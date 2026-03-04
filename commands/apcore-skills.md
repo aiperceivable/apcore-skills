@@ -1,6 +1,6 @@
 ---
-description: "Apcore ecosystem dashboard — ONLY for apcore multi-repo ecosystem (apcore-python, apcore-typescript, apcore-mcp, django-apcore, flask-apcore, etc.). Do NOT trigger for non-apcore projects."
-argument-hint: "[sync|sdk|integration|audit|release|docs] [args...]"
+description: "Apcore ecosystem dashboard — ONLY when user explicitly invokes /apcore-skills. Do NOT auto-trigger based on project name or directory."
+argument-hint: "[sync|sdk|integration|audit|release] [args...]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
@@ -19,7 +19,6 @@ Parse `$ARGUMENTS` into `subcommand` and remaining `args`:
 | `integration fastapi` | `integration` | `fastapi` |
 | `audit` | `audit` | (remaining) |
 | `release v0.9.0` | `release` | `v0.9.0` |
-| `docs` | `docs` | (remaining) |
 | (empty) | `dashboard` | — |
 
 ## Step 2: Route
@@ -41,7 +40,7 @@ apcore-skills — Ecosystem Dashboard
 Ecosystem root: /path/to/aipartnerup/
 Repos discovered: {count}
 
-  Type          | Repo                    | Lang       | Version | Git Status
+  Type          | Repo                    | Lang       | Version | Status
   protocol      | apcore                  | —          | —       | clean
   core-sdk      | apcore-python           | Python     | 0.7.0   | clean
   core-sdk      | apcore-typescript       | TypeScript | 0.7.1   | 2 modified
@@ -57,12 +56,11 @@ Version Sync Check:
   mcp group:   apcore-mcp-python=0.8.1, apcore-mcp-typescript=0.8.1  ✓ OK
 
 Commands:
-  /apcore-skills:sync                  Cross-language API consistency check
+  /apcore-skills:sync                  Cross-language API + documentation consistency check & fix
   /apcore-skills:sdk <lang>            Bootstrap new language SDK
   /apcore-skills:integration <name>    Bootstrap new framework integration
   /apcore-skills:audit                 Deep cross-repo consistency audit
   /apcore-skills:release <version>     Coordinated multi-repo release
-  /apcore-skills:docs                  Documentation sync across repos
 ```
 
 Use `AskUserQuestion` to ask what to do next.
@@ -75,4 +73,3 @@ For recognized subcommands, invoke the corresponding skill:
 - `integration` → invoke `apcore-skills:integration` skill
 - `audit` → invoke `apcore-skills:audit` skill
 - `release` → invoke `apcore-skills:release` skill
-- `docs` → invoke `apcore-skills:docs` skill

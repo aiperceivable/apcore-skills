@@ -30,7 +30,7 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--scope` | `all` | Which repo group to audit |
+| `--scope` | **cwd** | Which repo group to audit. **If omitted, defaults to the current working directory's repo only.** Use `--scope all` for full ecosystem audit. |
 | `--fix` | off | Auto-fix issues where safe |
 | `--save` | off | Save report to file |
 
@@ -82,7 +82,24 @@ Step 0 (ecosystem) → Step 1 (parse args) → Step 2 (parallel audits) → Step
 
 ### Step 1: Parse Arguments and Plan Audit
 
-Parse `$ARGUMENTS` for flags. Determine which repos and dimensions to audit based on scope.
+Parse `$ARGUMENTS` for flags.
+
+#### 1.1 CWD-based Default Scope
+
+**If `--scope` is NOT specified:**
+1. Detect CWD repo name (basename of CWD)
+2. Look up in discovered ecosystem:
+   - `core-sdk` repo → audit only this repo, dimensions D1-D3, D5-D6, D8
+   - `mcp-bridge` repo → audit only this repo, dimensions D1-D3, D5-D6, D8
+   - `integration` repo → audit only this repo, dimensions D2-D8
+   - `protocol`/`docs-site` repo → audit documentation dimensions only (D4) for this repo
+   - `shared-lib`/`tooling` repo → audit D2 (naming), D4 (docs), D5 (tests), D8 (structure) for this repo
+   - CWD not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to audit?" with options from `repos[]` names + "All repos (full ecosystem audit)"
+3. Display: "Scope: {repo-name} (from CWD). Use --scope all for full ecosystem audit."
+
+**If `--scope` IS specified:** use explicit scope.
+
+#### 1.2 Scope → Repos & Dimensions
 
 | Scope | Repos | Dimensions |
 |---|---|---|
@@ -93,9 +110,9 @@ Parse `$ARGUMENTS` for flags. Determine which repos and dimensions to audit base
 
 Display:
 ```
-Audit scope: {scope}
+Audit scope: {scope} {("(from CWD)" if defaulted)}
 Repos: {count} repositories
-Dimensions: D1-D8 (all)
+Dimensions: {list}
 ```
 
 ---
@@ -124,6 +141,10 @@ Compare across repos:
 - Constructor param count mismatches
 
 Return findings in format:
+Error handling:
+- If a repo path does not exist, skip it and report as: severity=warning, detail="Repo not found at {path}"
+- If main export file is missing, report as: severity=warning, detail="No exports found in {repo}"
+
 DIMENSION: D1 — API Surface
 FINDING_COUNT: {N}
 FINDINGS:
@@ -239,11 +260,18 @@ For each repo:
 1. Check tests/ directory exists
 2. Count test files
 3. Map source files to test files (check for coverage gaps)
-4. Run test suite and capture results:
-   - Python: first check if pytest is available (`python -m pytest --version`); if not, report as finding instead of running
-   - TypeScript: first check if vitest is available (`npx vitest --version`); if not, report as finding instead of running
+4. Run test suite and capture results (detect language from build config, check runner availability first):
    - Python: `pytest --tb=short -q`
    - TypeScript: `npx vitest run`
+   - Go: `go test -cover ./...`
+   - Rust: `cargo test`
+   - Java (Maven): `mvn test -q`
+   - Java (Gradle): `gradle test`
+   - C#: `dotnet test`
+   - Swift: `swift test`
+   - PHP: `vendor/bin/phpunit`
+   - Elixir: `mix test`
+   If the test runner is not available, report as a finding instead of running.
 5. If coverage tool available, capture coverage percentage
 
 Error handling:
@@ -430,7 +458,7 @@ If `--save` flag: write full report to specified path.
 Group fixable findings by repo. Separate unfixable findings for reporting.
 
 **Unfixable (skip and report):**
-- API surface fixes (complex — delegate to `/apcore-skills:sync --fix`)
+- API surface fixes (complex — delegate to `/apcore-skills:sync --phase a --fix`)
 - Dependency fixes (risky — show as recommendations only)
 
 **Fixable (per-repo parallel sub-agents):**
@@ -451,7 +479,7 @@ Fix rules (apply in order):
 4. DOC FIXES (D4) — Add missing README sections, fix CHANGELOG format
 
 After all fixes:
-- Run the full test suite ({pytest --tb=short -q | npx vitest run})
+- Run the full test suite (detect language: pytest | npx vitest run | go test ./... | cargo test | mvn test | gradle test | dotnet test | swift test | vendor/bin/phpunit | mix test)
 - If tests fail: identify which fix caused it, revert ONLY that fix
 - Leave all changes uncommitted
 
@@ -482,7 +510,8 @@ Tests after fix:
   {repo-2}: {pass}/{total} passing ✓
 
 Unfixed (manual action needed):
-  [D1-001] API surface gap — use /apcore-skills:sync --fix
+  [D1-001] API surface gap — use /apcore-skills:sync --phase a --fix
+  [D4-xxx] Doc inconsistency — use /apcore-skills:sync --phase b for deep check
   [D6-002] Dependency version — manually update {package}
 
 Review changes:

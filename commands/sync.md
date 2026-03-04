@@ -1,6 +1,6 @@
 ---
-description: "ONLY for apcore ecosystem. Cross-language API consistency check across apcore SDK implementations (apcore-python, apcore-typescript, apcore-mcp). Do NOT trigger for non-apcore projects."
-argument-hint: "[--fix] [--scope core|mcp|all] [--lang python,typescript,...]"
+description: "Unified cross-language and documentation consistency check for apcore ecosystem — ONLY when user explicitly invokes /apcore-skills:sync. Do NOT auto-trigger."
+argument-hint: "[--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--save]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 

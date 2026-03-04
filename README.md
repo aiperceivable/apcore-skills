@@ -9,12 +9,11 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Description |
 |---------|-------------|
 | `/apcore-skills` | Ecosystem dashboard — versions, coverage, health |
-| `/apcore-skills:sync` | Cross-language API consistency check & fix |
+| `/apcore-skills:sync` | Cross-language API + documentation consistency check & fix |
 | `/apcore-skills:sdk` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | Bootstrap a new framework integration |
 | `/apcore-skills:audit` | Deep cross-repo consistency audit |
 | `/apcore-skills:release` | Coordinated multi-repo release pipeline |
-| `/apcore-skills:docs` | Documentation sync across repos |
 
 ## Ecosystem
 

@@ -44,13 +44,13 @@ Canonical conventions that all apcore repositories must follow. Used by audit, s
 
 All public API names originate from the protocol spec. When implementing in a language, apply that language's convention:
 
-| Canonical (snake_case) | Python | TypeScript | Go | Rust | Java |
-|---|---|---|---|---|---|
-| `module_id` | `module_id` | `moduleId` | `ModuleID` / `moduleID` | `module_id` | `moduleId` |
-| `get_module` | `get_module` | `getModule` | `GetModule` | `get_module` | `getModule` |
-| `execute_module` | `execute_module` | `executeModule` | `ExecuteModule` | `execute_module` | `executeModule` |
-| `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` |
-| `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` | `ErrBindingNotFound` | `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` |
+| Canonical (snake_case) | Python | TypeScript | Go | Rust | Java | C# | Kotlin | Swift | PHP |
+|---|---|---|---|---|---|---|---|---|---|
+| `module_id` | `module_id` | `moduleId` | `ModuleID` / `moduleID` | `module_id` | `moduleId` | `ModuleId` | `moduleId` | `moduleId` | `$moduleId` |
+| `get_module` | `get_module` | `getModule` | `GetModule` | `get_module` | `getModule` | `GetModule` | `getModule` | `getModule` | `getModule` |
+| `execute_module` | `execute_module` | `executeModule` | `ExecuteModule` | `execute_module` | `executeModule` | `ExecuteModule` | `executeModule` | `executeModule` | `executeModule` |
+| `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` | `ErrorCode` |
+| `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` | `ErrBindingNotFound` | `BINDING_NOT_FOUND` | `BINDING_NOT_FOUND` | `BindingNotFound` | `BINDING_NOT_FOUND` | `bindingNotFound` | `BINDING_NOT_FOUND` |
 
 #### Project Structure Convention
 
@@ -70,7 +70,7 @@ apcore-{lang}/
 │   ├── bindings.{ext}
 │   ├── decorator.{ext}
 │   ├── extensions.{ext}
-│   ├── cancel.{ext}                # or cancel.{ext} for cancellation support
+│   ├── cancel.{ext}                # cancellation support
 │   ├── trace_context.{ext}         # or trace-context.{ext} for TS
 │   ├── middleware/
 │   ├── registry/
@@ -95,7 +95,8 @@ apcore-mcp-{lang}/
 │   ├── auth/                # JWT, claims mapping
 │   ├── adapters/            # annotations, approval, errors, schema
 │   ├── converters/          # OpenAI format export
-│   └── explorer/            # optional UI
+│   ├── cli.{ext}            # CLI entry point
+│   └── explorer/            # optional: web UI
 ├── tests/
 ├── {build-config}
 ├── README.md
@@ -114,7 +115,8 @@ apcore-mcp-{lang}/
 │   ├── context.{ext}       # request → apcore context mapping
 │   ├── scanners/            # framework-specific endpoint scanners
 │   ├── output/              # binding writers
-│   └── cli.{ext}            # management commands
+│   ├── cli.{ext}            # management commands
+│   └── observability.{ext}  # optional: framework-specific tracing
 ├── tests/
 ├── examples/                # demo project with Docker
 ├── {build-config}

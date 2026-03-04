@@ -76,19 +76,19 @@ Check if `apcore/docs/spec/type-mapping.md` exists. If so, use it for cross-lang
 
 Default type mappings:
 
-| Concept | Python | TypeScript | Go | Rust | Java |
-|---|---|---|---|---|---|
-| String | `str` | `string` | `string` | `String` / `&str` | `String` |
-| Integer | `int` | `number` | `int` / `int64` | `i64` | `long` |
-| Float | `float` | `number` | `float64` | `f64` | `double` |
-| Boolean | `bool` | `boolean` | `bool` | `bool` | `boolean` |
-| List | `list[T]` | `T[]` | `[]T` | `Vec<T>` | `List<T>` |
-| Dict/Map | `dict[K,V]` | `Record<K,V>` | `map[K]V` | `HashMap<K,V>` | `Map<K,V>` |
-| Optional | `T \| None` | `T \| undefined` | `*T` | `Option<T>` | `Optional<T>` |
-| Any/Dynamic | `Any` | `unknown` | `any` / `interface{}` | `Box<dyn Any>` | `Object` |
-| Result/Error | raise Exception | throw Error | `error` | `Result<T,E>` | throw Exception |
-| Async | `async def` | `async function` | goroutine | `async fn` | `CompletableFuture` |
-| Callback | `Callable` | `(...) => T` | `func(...)` | `Fn(...)` | `Function<T,R>` |
+| Concept | Python | TypeScript | Go | Rust | Java | PHP |
+|---|---|---|---|---|---|---|
+| String | `str` | `string` | `string` | `String` / `&str` | `String` | `string` |
+| Integer | `int` | `number` | `int` / `int64` | `i64` | `long` | `int` |
+| Float | `float` | `number` | `float64` | `f64` | `double` | `float` |
+| Boolean | `bool` | `boolean` | `bool` | `bool` | `boolean` | `bool` |
+| List | `list[T]` | `T[]` | `[]T` | `Vec<T>` | `List<T>` | `array` |
+| Dict/Map | `dict[K,V]` | `Record<K,V>` | `map[K]V` | `HashMap<K,V>` | `Map<K,V>` | `array` |
+| Optional | `T \| None` | `T \| undefined` | `*T` | `Option<T>` | `Optional<T>` | `?T` |
+| Any/Dynamic | `Any` | `unknown` | `any` / `interface{}` | `Box<dyn Any>` | `Object` | `mixed` |
+| Result/Error | raise Exception | throw Error | `error` | `Result<T,E>` | throw Exception | throw Exception |
+| Async | `async def` | `async function` | goroutine | `async fn` | `CompletableFuture` | `Fiber` / `Promise` |
+| Callback | `Callable` | `(...) => T` | `func(...)` | `Fn(...)` | `Function<T,R>` | `callable` |
 
 > **Note:** This table covers common single-level generics. For nested generics (e.g., `Result<Option<List<T>>, E>`), rely on language-specific type system knowledge rather than mechanical mapping. When in doubt, flag ambiguous type translations in the comparison output for manual review.
 

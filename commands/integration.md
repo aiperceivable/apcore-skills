@@ -1,6 +1,6 @@
 ---
-description: "ONLY for apcore ecosystem. Bootstrap a new apcore framework integration (like fastapi-apcore, express-apcore) following django-apcore/flask-apcore patterns. Do NOT trigger for non-apcore integrations."
-argument-hint: "<framework> [--lang python|typescript] [--ref django-apcore]"
+description: "Bootstrap a new apcore framework integration — ONLY when user explicitly invokes /apcore-skills:integration. Do NOT auto-trigger."
+argument-hint: "<framework> [--lang python|typescript|go] [--ref <existing-integration>]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 

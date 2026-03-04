@@ -1,6 +1,6 @@
 ---
-description: "ONLY for apcore ecosystem. Bootstrap a new apcore SDK in a new language (e.g., apcore-go, apcore-java) from apcore-python/apcore-typescript reference. Do NOT trigger for non-apcore SDKs."
-argument-hint: "<language> [--ref apcore-python]"
+description: "Bootstrap a new apcore SDK — ONLY when user explicitly invokes /apcore-skills:sdk. Do NOT auto-trigger."
+argument-hint: "<language> [--type core|mcp] [--ref <existing-sdk>]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 

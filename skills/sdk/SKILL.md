@@ -26,7 +26,7 @@ Bootstrap a new apcore core SDK or MCP bridge in a new language.
 
 ## When to Use
 
-- Starting a new apcore SDK in Go, Rust, Java, C#, etc.
+- Starting a new apcore SDK in Go, Rust, Java, C#, PHP, etc.
 - Starting a new apcore MCP bridge in a new language
 - Re-scaffolding an existing SDK that needs restructuring
 
@@ -38,7 +38,7 @@ Bootstrap a new apcore core SDK or MCP bridge in a new language.
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `<language>` | Yes | — | Target language: `go`, `rust`, `java`, `csharp`, `kotlin`, `swift` |
+| `<language>` | Yes | — | Target language: `go`, `rust`, `java`, `csharp`, `kotlin`, `swift`, `php` |
 | `--type` | No | `core` | What to scaffold: `core` (SDK) or `mcp` (MCP bridge) |
 | `--ref` | No | auto-detect | Reference implementation to extract API from |
 
@@ -66,9 +66,10 @@ Parse `$ARGUMENTS`:
 
 1. Extract `<language>` — required, use `AskUserQuestion` if missing
 2. Extract `--type` — default `core`
-3. Extract `--ref` — auto-detect:
-   - For `core`: prefer `apcore-python` if exists, else `apcore-typescript`
-   - For `mcp`: prefer `apcore-mcp-python` if exists, else `apcore-mcp-typescript`
+3. Extract `--ref` — resolve reference repo (priority order):
+   - If `--ref` explicitly specified: use that
+   - **If CWD is a same-type apcore repo** (e.g., in `apcore-python/` and `--type core`): use CWD repo as reference
+   - Otherwise auto-detect: for `core` prefer `apcore-python`, for `mcp` prefer `apcore-mcp-python`
 
 Derive target repo name:
 - Core SDK: `apcore-{lang}` (e.g., `apcore-go`, `apcore-java`)
@@ -237,6 +238,8 @@ Follow the apcore project structure convention:
 │   ├── bindings.{ext}              # stub
 │   ├── decorator.{ext}             # stub
 │   ├── extensions.{ext}            # stub
+│   ├── cancel.{ext}               # stub — cancellation support
+│   ├── trace_context.{ext}        # stub — trace context propagation
 │   ├── middleware/                   # stub directory
 │   ├── registry/                    # stub directory
 │   ├── schema/                      # stub directory
@@ -251,14 +254,15 @@ Follow the apcore project structure convention:
 ├── .gitignore
 ├── README.md
 ├── CHANGELOG.md
-├── LICENSE
+├── LICENSE                              # Detect from existing ecosystem repos or ask user (MIT / Apache-2.0)
 ├── src/
 │   ├── {main-module-file}
 │   ├── server/                      # factory, transport stubs
 │   ├── auth/                        # JWT stub
 │   ├── adapters/                    # adapter stubs
 │   ├── converters/                  # converter stubs
-│   └── cli.{ext}                   # CLI entry point stub
+│   ├── cli.{ext}                   # CLI entry point stub
+│   └── explorer/                    # optional: web UI stubs
 └── tests/
     └── {test-config}
 
@@ -281,6 +285,15 @@ Apply {lang} naming conventions:
 - Go: PascalCase for public, camelCase for private
 - Rust: snake_case for functions/methods, PascalCase for types
 - Java: camelCase for methods, PascalCase for classes
+- C#: PascalCase for methods and classes, camelCase for parameters/locals
+- Kotlin: camelCase for functions/methods, PascalCase for classes
+- Swift: camelCase for functions/methods, PascalCase for types/protocols
+- PHP: camelCase for methods, PascalCase for classes, $camelCase for variables
+
+Error handling:
+- If {target-path} is not writable, return: STATUS: WRITE_ERROR, REASON: "{description}"
+- If a file cannot be created, skip it and include in the return as "{file} (SKIPPED: {reason})"
+- If the language is not recognized, return: STATUS: UNSUPPORTED_LANG, REASON: "No scaffold template for {lang}"
 
 Create ALL files listed above. Return the list of files created.
 ```
@@ -343,9 +356,13 @@ Write `{target-path}/.code-forge.json`:
 }
 ```
 
-Initialize git (skip if already a git repo):
-```bash
-cd {target-path} && [ -d .git ] || git init && git add . && git commit -m "chore: initialize {target-repo-name} project skeleton"
+**Git initialization is left to the user.** Display:
+```
+Project scaffolded. To initialize git:
+  cd {target-path}
+  git init
+  git add <files...>
+  git commit -m "chore: initialize {target-repo-name} project skeleton"
 ```
 
 ---

@@ -83,9 +83,11 @@ Parse `$ARGUMENTS`:
    - Go frameworks: `gin`, `echo`, `fiber`, `chi`
    - Rust frameworks: `actix`, `axum`, `rocket`
    - Java frameworks: `spring`, `quarkus`, `micronaut`
-3. Extract `--ref` — auto-detect best reference:
-   - Same-language references preferred (e.g., for `fastapi` → `flask-apcore` or `django-apcore`)
-   - Fall back to any existing integration
+   - PHP frameworks: `laravel`, `symfony`, `slim`, `lumen`
+3. Extract `--ref` — resolve reference integration (priority order):
+   - If `--ref` explicitly specified: use that
+   - **If CWD is an existing integration repo** (e.g., in `django-apcore/`): use CWD repo as reference
+   - Otherwise auto-detect: same-language integration preferred, fall back to any existing integration
 
 Derive target repo name: `{framework}-apcore`
 Derive target path: `{ecosystem_root}/{framework}-apcore/`
@@ -273,6 +275,18 @@ Framework config: {framework_config}
 
 All files should have proper stubs with TODO markers for implementation.
 
+Naming conventions:
+- Python: snake_case for functions/methods, PascalCase for classes
+- TypeScript: camelCase for functions/methods, PascalCase for classes
+- Go: PascalCase for public, camelCase for private
+- Rust: snake_case for functions/methods, PascalCase for types
+- Java: camelCase for methods, PascalCase for classes
+
+Error handling:
+- If {target-path} is not writable, return: STATUS: WRITE_ERROR, REASON: "{description}"
+- If a file cannot be created, skip it and include in the return as "{file} (SKIPPED: {reason})"
+- If the framework is not recognized, proceed with generic scaffold and note: "Unknown framework — used generic pattern"
+
 Create ALL files listed. Return file list.
 ```
 
@@ -312,9 +326,13 @@ Feature specs to generate (one per core capability):
 
 Write to `{target-path}/docs/features/`.
 
-Initialize git:
-```bash
-cd {target-path} && git init && git add . && git commit -m "chore: initialize {framework}-apcore project skeleton"
+**Git initialization is left to the user.** Display:
+```
+Project scaffolded. To initialize git:
+  cd {target-path}
+  git init
+  git add <files...>
+  git commit -m "chore: initialize {framework}-apcore project skeleton"
 ```
 
 ---

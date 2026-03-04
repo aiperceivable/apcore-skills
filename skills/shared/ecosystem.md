@@ -42,7 +42,6 @@ Scan `ecosystem_root` for known repository patterns:
 | `flask-apcore/` | `integration` | Python | Flask |
 | `nestjs-apcore/` | `integration` | TypeScript | NestJS |
 | `tiptap-apcore/` | `integration` | TypeScript | TipTap |
-| `express-apcore/` | `integration` | TypeScript | Express |
 | `{framework}-apcore/` | `integration` | varies | `{framework}` |
 
 **Shared Libraries:**
@@ -62,14 +61,14 @@ Scan `ecosystem_root` for known repository patterns:
 | Directory Pattern | Repo Type | Status |
 |---|---|---|
 | `comfyui-apcore/` | `integration` | Early stage (may have only `ideas/` dir) |
-| `express-apcore/` | `integration` | Placeholder (may be empty) |
+| `express-apcore/` | `integration` | Placeholder — matched by `{framework}-apcore/` wildcard when ready |
 | `apcore-studio/` | `tooling` | Placeholder |
 
 **Exclude from ecosystem scans** (not apcore SDK/integration repos):
 - `aphub*`, `apflow*`, `apdev*`, `aipartnerup-website/` — separate product lines, not part of apcore SDK ecosystem
 
 For each discovered directory:
-1. Check if it contains a valid project (has `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `mix.exs`, `Package.swift`, or `*.csproj`)
+1. Check if it contains a valid project (has `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `composer.json`, `mix.exs`, `Package.swift`, or `*.csproj`)
 2. Skip `docs-site` type repos (no build config, only `mkdocs.yml` or markdown files)
 3. Flag `placeholder` repos (directory exists but no source files — report as "empty/placeholder")
 4. Extract version from the build config file
@@ -78,7 +77,23 @@ For each discovered directory:
 
 Store `repos[]` — list of discovered repository objects with: `name`, `path`, `type`, `language`, `version`, `package_name`, `git_status`.
 
-#### 0.3 Load Configuration
+#### 0.3 Detect CWD Repo
+
+Determine `cwd_repo` — the repo the user is currently working in:
+1. Get CWD basename (e.g., `apcore-python`)
+2. Match against `repos[]` by name
+3. If matched, store `cwd_repo = { name, type, language, scope_group }`:
+   - `core-sdk` → `scope_group = "core"`
+   - `mcp-bridge` → `scope_group = "mcp"`
+   - `integration` → `scope_group = "integrations"`
+   - `protocol` / `docs-site` → `scope_group = "docs"`
+   - `shared-lib` → `scope_group = "shared"`
+   - `tooling` → `scope_group = "tooling"`
+4. If not matched, `cwd_repo = null`
+
+This is used by sync, audit, and release as the **default scope** when `--scope` is not specified. If `cwd_repo` is null (CWD is not an apcore repo), each skill should use `AskUserQuestion` to let the user pick a target repo instead of silently scanning everything.
+
+#### 0.4 Load Configuration
 
 Load configuration by priority (deep-merge):
 
@@ -96,21 +111,27 @@ Load configuration by priority (deep-merge):
 
 3. **Project config** (`<ecosystem_root>/.apcore-skills.json`, if exists) → deep-merge
 
-#### 0.4 Version Extraction Rules
+#### 0.5 Version Extraction Rules
 
 | File | Version Location |
 |---|---|
 | `pyproject.toml` | `[project] version = "X.Y.Z"` |
 | `package.json` | `"version": "X.Y.Z"` |
 | `Cargo.toml` | `[package] version = "X.Y.Z"` |
-| `go.mod` | Tag-based (check git tags) |
+| `go.mod` | Tag-based (check `git tag -l 'v*'` for latest) |
 | `pom.xml` | `<version>X.Y.Z</version>` |
+| `build.gradle` | `version = 'X.Y.Z'` or `version 'X.Y.Z'` |
+| `build.gradle.kts` | `version = "X.Y.Z"` |
+| `mix.exs` | `version: "X.Y.Z"` in `project/0` |
+| `Package.swift` | Version constant or git tag-based |
+| `*.csproj` | `<Version>X.Y.Z</Version>` |
+| `composer.json` | `"version": "X.Y.Z"` |
 | `__init__.py` / `_version.py` | `__version__ = "X.Y.Z"` |
 | `src/*/index.ts` | `export const VERSION = "X.Y.Z"` |
 
 For Python projects, also check `src/*/__init__.py` for `__version__`.
 
-#### 0.5 Display Discovery Summary
+#### 0.6 Display Discovery Summary
 
 ```
 apcore-skills — Ecosystem Dashboard
@@ -131,7 +152,7 @@ Repos discovered: {count}
   shared-lib    | apcore-discovery-python | Python     | —       | clean
 ```
 
-#### 0.6 Store Ecosystem Context
+#### 0.7 Store Ecosystem Context
 
 Track resolved values for subsequent steps:
 - `config` — final merged configuration object

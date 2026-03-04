@@ -44,7 +44,7 @@ Execute a coordinated release across multiple apcore ecosystem repositories.
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `<version>` | Yes | — | Target version (e.g., `0.9.0`, `1.0.0`) |
-| `--scope` | No | `core` | Which repos to release |
+| `--scope` | No | **cwd** | Which repos to release. **If omitted, defaults to the current working directory's repo only.** Use `--scope core\|mcp\|all` for group release. |
 | `--dry-run` | No | off | Show what would change without making changes |
 
 ## Workflow
@@ -73,12 +73,25 @@ Parse `$ARGUMENTS`:
 2. Extract `--scope` — determine which repos to release
 3. Extract `--dry-run` — simulation mode
 
-Determine release repos:
+#### 1.1 CWD-based Default Scope
+
+**If `--scope` is NOT specified:**
+1. Detect CWD repo name (basename of CWD)
+2. Look up in discovered ecosystem:
+   - If it's a known apcore repo → release **only this repo**
+   - If CWD is a `protocol`/`docs-site` repo → error: "Documentation repos cannot be released directly. Specify --scope core|mcp|all."
+   - If CWD is not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to release?" with options from `repos[]` names + "All repos (group release)"
+3. Display: "Release scope: {repo-name} (from CWD). Use --scope core|mcp|all for group release."
+
+**If `--scope` IS specified:** use explicit scope.
+
+#### 1.2 Scope → Repos
 
 | Scope | Repos |
 |---|---|
-| `core` | All core SDKs (apcore-python, apcore-typescript, ...) |
-| `mcp` | All MCP bridges (apcore-mcp-python, apcore-mcp-typescript, ...) |
+| (cwd default) | Only the CWD repo |
+| `core` | All core SDKs |
+| `mcp` | All MCP bridges |
 | `integrations` | Use `AskUserQuestion` to select which integrations |
 | `all` | All repos (use `AskUserQuestion` to confirm version per group) |
 
@@ -109,6 +122,10 @@ Run pre-flight checks for release in {repo_path}.
 2. Branch: run `git -C {repo_path} branch --show-current` — should be main or master
 3. Current version: extract from build config (pyproject.toml or package.json)
 4. Git tags: run `git -C {repo_path} tag --sort=-v:refname | head -5` — list recent tags
+
+Error handling:
+- If the repo path does not exist, return: REPO: {repo-name}, STATUS: NOT_FOUND
+- If git is not initialized, return: REPO: {repo-name}, STATUS: NO_GIT
 
 Return:
 REPO: {repo-name}
@@ -156,11 +173,42 @@ For TypeScript repos:
 2. src/index.ts → VERSION constant (if exists)
 3. package-lock.json → top-level "version" (if exists)
 
+For Go repos:
+1. Version constant in internal/version.go or cmd/version.go (if exists)
+2. Go modules use git tags (v{new_version}) — note for Step 7 tagging
+
+For Rust repos:
+1. Cargo.toml → [package] version = "{new_version}"
+2. Cargo.lock → update corresponding entry (if exists)
+
+For Java repos (Maven):
+1. pom.xml → <version>{new_version}</version>
+
+For Java repos (Gradle):
+1. build.gradle or build.gradle.kts → version = "{new_version}"
+2. gradle.properties → version={new_version} (if exists)
+
+For PHP repos:
+1. composer.json → "version": "{new_version}"
+
+For C# repos:
+1. *.csproj → <Version>{new_version}</Version>
+
+For Swift repos:
+1. Package.swift → version constant (if exists)
+
+For Elixir repos:
+1. mix.exs → version: "{new_version}"
+
 Additional (all repos):
 - README.md → version badges or installation instructions mentioning version
 - Any other file containing the old version string (search with grep)
 
 {If dry-run:} Do NOT modify any files. Just report what would change.
+
+Error handling:
+- If a version file is missing, skip it and note in CHANGES as "{file} (NOT_FOUND)"
+- If a file is unwritable, skip it and note in CHANGES as "{file} (WRITE_ERROR)"
 
 Return:
 REPO: {repo-name}
@@ -263,6 +311,10 @@ The core SDK version has been bumped to {new_version}.
 
 {If dry-run:} Do NOT modify any files. Just report what would change.
 
+Error handling:
+- If build config is missing, return: REPO: {repo-name}, STATUS: NO_BUILD_CONFIG
+- If no apcore dependencies found, return: REPO: {repo-name}, UPDATES: [] (empty — no apcore deps)
+
 Return:
 REPO: {repo-name}
 UPDATES:
@@ -293,6 +345,10 @@ Detect the language from the build config file and use the appropriate test comm
 - Rust (Cargo.toml): cd {repo_path} && cargo test 2>&1
 - Java/Maven (pom.xml): cd {repo_path} && mvn test -q 2>&1
 - Java/Gradle (build.gradle): cd {repo_path} && gradle test 2>&1
+- C# (*.csproj): cd {repo_path} && dotnet test 2>&1
+- Swift (Package.swift): cd {repo_path} && swift test 2>&1
+- PHP (composer.json): cd {repo_path} && vendor/bin/phpunit 2>&1
+- Elixir (mix.exs): cd {repo_path} && mix test 2>&1
 
 Return:
 REPO: {repo-name}
