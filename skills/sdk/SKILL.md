@@ -332,8 +332,7 @@ Write `{target-path}/.code-forge.json`:
   "_tool": {
     "name": "code-forge",
     "description": "Transform documentation into actionable development plans",
-    "url": "https://github.com/tercel/code-forge",
-    "skills_collection": "https://github.com/tercel/claude-code-skills"
+    "url": "https://github.com/tercel/code-forge"
   },
   "directories": {
     "base": "./",

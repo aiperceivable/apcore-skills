@@ -1,10 +1,12 @@
 {
   "name": "apcore-skills",
   "description": "Apcore ecosystem management — cross-language SDK sync, framework integration scaffolding, multi-repo audit, coordinated releases, and documentation alignment",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
-    "name": "aipartnerup",
-    "url": "https://github.com/aipartnerup"
+    "name": "tercel",
+    "email": "tercel.yi@gmail.com",
+    "url": "https://github.com/aipartnerup",
+    "x": "https://x.com/tercelyi"
   },
   "repository": "https://github.com/aipartnerup/apcore-skills",
   "license": "Apache-2.0",
