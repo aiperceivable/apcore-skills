@@ -48,16 +48,47 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--save]
 ```
 
-| Flag | Default | Description |
+| Argument / Flag | Default | Description |
 |------|---------|-------------|
+| positional repos | — | Comma-separated repo names to sync. See **Positional Repo Arguments** below. |
 | `--phase` | `all` | Which phase to run: `a` (spec vs implementation), `b` (documentation internal consistency), `all` (A then B) |
 | `--fix` | off | Auto-fix issues (naming, stubs, doc references) |
-| `--scope` | **cwd** | Which group: `core`, `mcp`, `all`. **If omitted, defaults to the current working directory's repo only.** Use `--scope all` to scan all repos. |
+| `--scope` | **cwd** | Which group: `core`, `mcp`, `all`. **If omitted and no positional repos, defaults to the current working directory's repo only.** Use `--scope all` to scan all repos. |
 | `--lang` | all discovered | Comma-separated list of languages to compare |
 | `--save` | off | Save report to file |
+
+### Positional Repo Arguments
+
+Positional repo names control **exactly** which repos are included. They take priority over `--scope` and CWD-based defaults.
+
+**Multiple repos (explicit set):**
+```
+/apcore-skills:sync apcore,apcore-typescript,apcore-python
+```
+Syncs exactly these 3 repos — no expansion, no auto-discovery. The doc repo and impl repos are determined from the provided list:
+- If a `protocol` repo (e.g., `apcore`) is in the list → it becomes `doc_repo` for core scope
+- If a `docs-site` repo (e.g., `apcore-mcp`) is in the list → it becomes `doc_repo` for mcp scope
+- If no doc repo is in the list → auto-include the relevant doc repo based on the impl repos' scope group (a `core-sdk` repo implies `apcore/` as doc repo; a `mcp-bridge` repo implies `apcore-mcp/` as doc repo)
+- All remaining repos become `impl_repos`
+
+**Single repo name — smart expansion:**
+```
+/apcore-skills:sync apcore
+```
+A single repo name triggers **smart expansion** based on the repo's type:
+- `protocol` repo (`apcore`) → expand to `apcore` + **all discovered `core-sdk` repos** (`apcore-{lang}`). Does NOT include `mcp-bridge` repos.
+- `docs-site` repo (`apcore-mcp`) → expand to `apcore-mcp` + **all discovered `mcp-bridge` repos** (`apcore-mcp-{lang}`)
+- `core-sdk` repo (`apcore-python`) → expand to this repo + its `doc_repo` (`apcore`). Only this single impl repo, not all core SDKs.
+- `mcp-bridge` repo (`apcore-mcp-python`) → expand to this repo + its `doc_repo` (`apcore-mcp`). Only this single impl repo.
+- `integration` repo → Phase A N/A, Phase B only on this repo
+- `shared-lib` or `tooling` repo → Phase B only on this repo
+
+Display: `"Scope: {repo-names} (from positional args)"`
+
+**No positional repos:** Falls through to `--scope` or CWD-based default (see Step 1.1).
 
 ## Documentation and Implementation Repo Mapping
 
@@ -101,12 +132,29 @@ Filter repos based on `--scope` and `--lang` flags. Identify documentation repos
 
 ### Step 1: Parse Arguments and Determine Scope
 
-Parse `$ARGUMENTS` for all flags. Determine:
+Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
 - Active phases (a, b, or both)
 - Scope groups and language filter
 - Fix mode
+- Target repos (from positional args, `--scope`, or CWD)
+
+**Resolution priority:** Positional repo args > `--scope` flag > CWD-based default.
+
+#### 1.0 Positional Repo Arguments
+
+**If positional repo names are provided** (comma-separated, non-flag tokens in `$ARGUMENTS`):
+
+1. Split by comma to get the repo name list
+2. Validate each name against `repos[]` from ecosystem discovery. If a name is not found, report error: `"Repo '{name}' not found in ecosystem. Available: {repo names}"`
+3. Apply the expansion rules from **Positional Repo Arguments** section above:
+   - **Multiple repos** → use exactly as provided, auto-include doc repos if missing
+   - **Single repo** → apply smart expansion based on repo type
+4. Skip `--scope` and CWD-based default logic entirely
+5. Display: `"Scope: {repo-names} (from positional args). {N} doc repos, {N} impl repos."`
 
 #### 1.1 CWD-based Default Scope
+
+**Only applies when NO positional repos are provided.**
 
 **If `--scope` is NOT specified:**
 1. Detect the current working directory's repo name (basename of CWD, e.g., `apcore-python`)
