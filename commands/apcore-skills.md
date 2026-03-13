@@ -44,6 +44,7 @@ Repos discovered: {count}
   protocol      | apcore                  | —          | —       | clean
   core-sdk      | apcore-python           | Python     | 0.7.0   | clean
   core-sdk      | apcore-typescript       | TypeScript | 0.7.1   | 2 modified
+  core-sdk      | apcore-rust             | Rust       | 0.1.0   | clean
   mcp-bridge    | apcore-mcp-python       | Python     | 0.8.1   | clean
   mcp-bridge    | apcore-mcp-typescript   | TypeScript | 0.8.1   | clean
   integration   | django-apcore           | Python     | 0.2.0   | clean
@@ -52,7 +53,7 @@ Repos discovered: {count}
   integration   | tiptap-apcore           | TypeScript | 0.1.0   | clean
 
 Version Sync Check:
-  core group:  apcore-python=0.7.0, apcore-typescript=0.7.1  ⚠ MISMATCH
+  core group:  apcore-python=0.7.0, apcore-typescript=0.7.1, apcore-rust=0.1.0  ⚠ MISMATCH
   mcp group:   apcore-mcp-python=0.8.1, apcore-mcp-typescript=0.8.1  ✓ OK
 
 Commands:

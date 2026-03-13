@@ -658,6 +658,7 @@ After collecting all per-repo findings, the main context performs cross-repo che
   Repo                    | README | API Refs | Examples | Cross-Doc
   apcore-python           |  PASS  |   PASS   |    —     |   PASS
   apcore-typescript       |  WARN  |   FAIL   |    —     |   FAIL
+  apcore-rust             |  PASS  |   PASS   |    —     |   PASS
   apcore-mcp-python       |  PASS  |   PASS   |    —     |   PASS
   apcore-mcp-typescript   |  WARN  |   PASS   |    —     |   PASS
 

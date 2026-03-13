@@ -113,8 +113,8 @@ Load configuration by priority (deep-merge):
    - `reference_sdk.typescript` = `"apcore-typescript"`
    - `reference_mcp.python` = `"apcore-mcp-python"`
    - `reference_mcp.typescript` = `"apcore-mcp-typescript"`
-   - `version_groups.core` = `["apcore-python", "apcore-typescript"]`
-   - `version_groups.mcp` = `["apcore-mcp-python", "apcore-mcp-typescript"]`
+   - `version_groups.core` = auto-populated from all discovered `core-sdk` repos (e.g., `["apcore-python", "apcore-typescript", "apcore-rust", ...]`)
+   - `version_groups.mcp` = auto-populated from all discovered `mcp-bridge` repos (e.g., `["apcore-mcp-python", "apcore-mcp-typescript", ...]`)
    - Other `version_groups.{type}` are auto-populated from discovered `apcore-{type}-{lang}` repos
 
 2. **User global config** (`~/.apcore-skills.json`, if exists) → deep-merge
@@ -153,6 +153,7 @@ Repos discovered: {count}
   protocol      | apcore                  | —          | —       | clean
   core-sdk      | apcore-python           | Python     | 0.7.0   | clean
   core-sdk      | apcore-typescript       | TypeScript | 0.7.1   | dirty
+  core-sdk      | apcore-rust             | Rust       | 0.1.0   | clean
   mcp-bridge    | apcore-mcp-python       | Python     | 0.8.1   | clean
   mcp-bridge    | apcore-mcp-typescript   | TypeScript | 0.8.1   | clean
   integration   | django-apcore           | Python     | 0.2.0   | clean
