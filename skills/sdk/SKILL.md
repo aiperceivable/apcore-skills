@@ -1,10 +1,10 @@
 ---
 name: sdk
 description: >
-  Bootstrap a new language SDK for the apcore ecosystem. Scaffolds the project
-  structure with source stubs, test stubs (TDD red phase), and runnable examples
-  ported from the reference implementation. Extracts the full API contract from
-  the protocol spec and configures code-forge for implementation planning.
+  Bootstrap and implement a new language SDK for the apcore ecosystem. Scaffolds
+  the project structure, extracts API contract, then automatically continues with
+  code-forge:port (plan generation) and code-forge:impl (TDD implementation) to
+  deliver a fully implemented SDK — not just stubs.
 ---
 
 # Apcore Skills — SDK
@@ -52,12 +52,12 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 ## Context Management
 
-Steps 2 and 4 use sub-agents. Step 2 analyzes the reference implementation. Step 4 generates the project skeleton. The main context orchestrates and retains only summaries.
+Steps 2 and 4 use sub-agents. Step 2 analyzes the reference implementation. Step 4 generates the project skeleton. Steps 8–9 invoke code-forge skills which manage their own sub-agents. The main context orchestrates and retains only summaries.
 
 ## Workflow
 
 ```
-Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs) → 6 (plan generation) → 7 (summary)
+Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs) → 6 (code-forge config) → 7 (git init) → 8 (port) → 9 (impl) → 10 (summary)
 ```
 
 ## Bundled References
@@ -183,7 +183,7 @@ If they don't exist:
 
 ---
 
-### Step 6: Generate .code-forge.json and Trigger Planning
+### Step 6: Generate .code-forge.json
 
 Write `{target-path}/.code-forge.json`:
 ```json
@@ -208,45 +208,93 @@ Write `{target-path}/.code-forge.json`:
 
 Optionally add `reference_docs.sources` if the reference repo has `planning/` output. After writing, resolve each relative path (`input`, `reference_impl`, `source_docs`) and warn if any don't exist yet. Missing paths are acceptable (they may be created later) but should be noted.
 
-**Git initialization is left to the user.** Display:
+---
+
+### Step 7: Git Initialization
+
+Initialize git and create the skeleton commit automatically:
+
+```bash
+cd {target-path}
+git init
+git add .
+git commit -m "chore: initialize {target-repo-name} project skeleton"
 ```
-Project scaffolded. To initialize git:
-  cd {target-path}
-  git init
-  git add <files...>
-  git commit -m "chore: initialize {target-repo-name} project skeleton"
+
+Display:
+```
+Git initialized with skeleton commit.
 ```
 
 ---
 
-### Step 7: Display Summary and Next Steps
+### Step 8: Auto-Port — Generate Implementation Plans
+
+Display:
+```
+Scaffolding complete. Continuing with implementation plan generation...
+```
+
+Invoke `/code-forge:port` with the following context:
+- `source_docs`: `{protocol_path}`
+- `reference_impl`: `{ref_path}`
+- `target_lang`: `{lang}`
+- Working directory: `{target-path}`
+
+This generates per-feature implementation plans with TDD task breakdowns in `{target-path}/planning/`.
+
+Wait for port to complete before proceeding.
+
+---
+
+### Step 9: Auto-Impl — Execute TDD Implementation
+
+Display:
+```
+Implementation plans generated. Starting TDD implementation...
+```
+
+Invoke `/code-forge:impl` to execute all planned features sequentially. Each feature follows the TDD Red-Green-Refactor cycle:
+1. Run failing tests (red — already created in Step 4)
+2. Write minimal implementation to pass (green)
+3. Refactor for idiom and clarity
+
+Continue until all features are implemented or a blocking error occurs. If a blocking error occurs, stop and display the error with context so the user can intervene.
+
+After each feature completes, commit the implementation:
+```bash
+git add .
+git commit -m "feat({module}): implement {feature-name} for {target-repo-name}"
+```
+
+---
+
+### Step 10: Display Summary
 
 ```
-apcore-skills:sdk — SDK Bootstrap Complete
+apcore-skills:sdk — SDK Complete
 
 Target: {target-path}
 Language: {lang}
 Type: {type}
-Modules: {N} source files scaffolded
-Tests: {N} test stubs (TDD red phase)
+Modules: {N} source files implemented
+Tests: {N} tests passing
 Examples: {N} runnable examples
-Feature specs: {N} specs available
-API contract: {N} public symbols to implement
+Feature specs: {N} specs
 
-Project structure:
-  {tree output of key files}
+Implementation status:
+  {feature-1}: ✅ implemented
+  {feature-2}: ✅ implemented
+  ...
 
 Next steps:
-  cd {target-path}
-  /code-forge:port @{protocol-path} --ref {ref-repo} --lang {lang}    Generate implementation plans
-  /code-forge:impl {first-feature}                                      Start implementing
-  /apcore-skills:sync --lang {lang},{ref-lang}                           Verify API consistency
+  /apcore-skills:sync --lang {lang},{ref-lang}    Verify API consistency
+  /apcore-skills:audit                              Comprehensive ecosystem check
+  /apcore-skills:release                            Coordinated release
 ```
 
 ## Coordination with Other Skills
 
-- **After sdk:** Use `code-forge:port` to generate implementation plans for each feature
-- **During implementation:** Use `code-forge:impl` to execute TDD tasks
-- **After implementation:** Use `apcore-skills:sync` to verify cross-language consistency
+- **After sdk:** Use `apcore-skills:sync` to verify cross-language consistency
 - **Before release:** Use `apcore-skills:audit` for comprehensive check
 - **For release:** Use `apcore-skills:release` for coordinated version bump
