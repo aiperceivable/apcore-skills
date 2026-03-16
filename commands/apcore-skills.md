@@ -1,6 +1,6 @@
 ---
 description: "Apcore ecosystem dashboard — ONLY when user explicitly invokes /apcore-skills. Do NOT auto-trigger based on project name or directory."
-argument-hint: "[sync|sdk|integration|audit|release] [args...]"
+argument-hint: "[sync|sdk|integration|audit|release|tester] [args...]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
@@ -19,6 +19,7 @@ Parse `$ARGUMENTS` into `subcommand` and remaining `args`:
 | `integration fastapi` | `integration` | `fastapi` |
 | `audit` | `audit` | (remaining) |
 | `release v0.9.0` | `release` | `v0.9.0` |
+| `tester apcore-python` | `tester` | `apcore-python` |
 | (empty) | `dashboard` | — |
 
 ## Step 2: Route
@@ -57,11 +58,24 @@ Version Sync Check:
   mcp group:   apcore-mcp-python=0.8.1, apcore-mcp-typescript=0.8.1  ✓ OK
 
 Commands:
-  /apcore-skills:sync                  Cross-language API + documentation consistency check & fix
-  /apcore-skills:sdk <lang>            Bootstrap new language SDK
-  /apcore-skills:integration <name>    Bootstrap new framework integration
-  /apcore-skills:audit                 Deep cross-repo consistency audit
-  /apcore-skills:release <version>     Coordinated multi-repo release
+
+  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--save]
+      Cross-language API + documentation consistency check & fix
+
+  /apcore-skills:sdk <language> [--type core|mcp] [--ref <existing-sdk>]
+      Bootstrap new language SDK
+
+  /apcore-skills:integration <framework> [--lang python|typescript|go] [--ref <existing-integration>]
+      Bootstrap new framework integration
+
+  /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--save report.md]
+      Deep cross-repo consistency audit
+
+  /apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|all] [--save report.md]
+      Spec-driven test generation & cross-language behavioral verification
+
+  /apcore-skills:release <version> [--scope core|mcp|integrations|all] [--dry-run]
+      Coordinated multi-repo release
 ```
 
 Use `AskUserQuestion` to ask what to do next.
@@ -74,3 +88,4 @@ For recognized subcommands, invoke the corresponding skill:
 - `integration` → invoke `apcore-skills:integration` skill
 - `audit` → invoke `apcore-skills:audit` skill
 - `release` → invoke `apcore-skills:release` skill
+- `tester` → invoke `apcore-skills:tester` skill
