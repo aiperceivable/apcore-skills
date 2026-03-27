@@ -5,7 +5,8 @@ description: >
   Phase A: verifies feature specs and protocol spec match all language implementations
   (classes, functions, parameters, return types) via itemized checklist comparison.
   Phase B: verifies all documentation (PRD, SRS, Tech Design, Test Plan, Feature Specs,
-  PROTOCOL_SPEC, README, examples) is internally consistent and free of contradictions.
+  PROTOCOL_SPEC, README, examples, tests) is internally consistent and free of contradictions.
+  Includes cross-language example scenario coverage and test scenario coverage comparison.
   Covers both apcore core SDKs and apcore-mcp bridges.
 instructions: >
   The documentation repos (apcore/, apcore-mcp/) are the single source of truth.
@@ -476,7 +477,7 @@ Read all available documents from the spec chain:
 - PRD (if exists): docs/prd.md or similar
 - SRS (if exists): docs/srs.md or similar
 - Tech Design (if exists): docs/tech-design.md or similar
-- Test Plan (if exists): docs/test-plan.md or similar
+- Test Cases (if exists): docs/test-cases.md or similar
 - Feature Specs: docs/features/*.md
 - Protocol Spec (if exists): PROTOCOL_SPEC.md
 
@@ -508,7 +509,7 @@ DOC_REPO: {repo-name}
 DOCUMENTS_FOUND: {list of documents checked with paths}
 
 SPEC_CHAIN:
-  LAYERS_CHECKED: {list: prd, srs, tech-design, test-plan, feature-specs, protocol-spec}
+  LAYERS_CHECKED: {list: prd, srs, tech-design, test-cases, feature-specs, protocol-spec}
   CONTRADICTIONS: {N}
   GAPS: {N}
 
@@ -574,8 +575,26 @@ Search ALL markdown files in the repo (README.md, docs/**/*.md) for API symbol r
    b. Cross-reference against verified API — correct class names, method names, params?
    c. Check dependency versions reference correct SDK version
 3. Check example README exists with setup instructions
+4. Build an inventory of example scenarios (list each example by purpose/scenario name):
+   - e.g., "basic_usage", "custom_config", "middleware_chain", "error_handling"
+   - Include this inventory in the EXAMPLES section of the return format below
 
-=== SCOPE 4: Cross-Document Contradiction Detection ===
+=== SCOPE 4: Test Consistency ===
+
+1. Scan tests/, test/, __tests__/, spec/ directories
+2. Build a test scenario inventory:
+   a. For each test file, extract:
+      - Test file name (normalized: test_registry.py → registry, registry.test.ts → registry)
+      - Test case names/descriptions (normalized to snake_case for comparison)
+      - API symbols under test (which classes/functions/methods each test exercises)
+   b. Group by feature area (registry, executor, config, etc.)
+   c. For parameterized/table-driven tests, expand each parameter set as a separate scenario in the inventory. For pytest.mark.parametrize, each parameter tuple is one scenario. For test.each/it.each, each row is one scenario. This ensures fair cross-language comparison.
+3. Cross-reference test API usage against verified API:
+   a. Are class names, method names, and params correct?
+   b. Are deprecated or renamed APIs still used in tests?
+4. Include all extracted data in the TESTS section of the return format below
+
+=== SCOPE 5: Cross-Document Contradiction Detection ===
 
 For every API symbol mentioned in more than one place within this repo:
 1. Collect all references (file, line, what it says)
@@ -599,6 +618,20 @@ API_REFS:
 EXAMPLES:
   EXAMPLE_DIRS: {list or "none"}
   MISMATCHES: {N}
+  SCENARIO_INVENTORY:
+  - {scenario_name}: {brief description}
+  - ...
+
+TESTS:
+  TEST_DIRS: {list or "none"}
+  TOTAL_TEST_FILES: {N}
+  TOTAL_TEST_CASES: {N}
+  API_MISMATCHES: {N}
+  FEATURE_AREAS: {list with test counts}
+  SCENARIO_INVENTORY:
+  - area: {feature_area}
+    tests: [{test_name_1}, {test_name_2}, ...]
+  - ...
 
 CONTRADICTIONS: {N}
   {list of cases where different docs within this repo say different things}
@@ -606,7 +639,7 @@ CONTRADICTIONS: {N}
 FINDING_COUNT: {N}
 FINDINGS:
 - severity: {critical|warning|info}
-  scope: {readme|api-refs|examples|contradiction}
+  scope: {readme|api-refs|examples|tests|contradiction}
   detail: {description}
   location: {file:section or file:line}
   verified_api_says: {correct value from Phase A}
@@ -617,20 +650,37 @@ Error handling:
 - If the repo path does not exist, return: REPO: {repo-name}, STATUS: NOT_FOUND
 - If README.md is missing, report SECTIONS_PRESENT: [], SECTIONS_MISSING: ["all"], and continue checking other scopes
 - If no markdown files are found, skip API_REFS scope and report REFERENCES_CHECKED: 0
-- If no example directories exist, report EXAMPLE_DIRS: "none", MISMATCHES: 0
+- If no example directories exist, report EXAMPLE_DIRS: "none", MISMATCHES: 0, SCENARIO_INVENTORY: []
+- If no test directories exist, report TEST_DIRS: "none", TOTAL_TEST_FILES: 0, TOTAL_TEST_CASES: 0, SCENARIO_INVENTORY: []
 ```
 
 **Main context retains:** Structured findings per repo.
 
 ---
 
-### Step 7: Cross-Repo Documentation Consistency
+### Step 7: Cross-Repo Documentation, Examples, and Tests Consistency
 
 After collecting all per-repo findings, the main context performs cross-repo checks:
 
 1. **Cross-repo API description consistency** — if apcore-python's README describes `Registry.get_module()` with certain behavior, and apcore-typescript's README describes `Registry.getModule()` differently, flag it (semantic description should match even if name differs by convention)
 2. **Shared documentation links** — do all implementation repos link to the same docs site version?
 3. **Doc repo vs implementation README alignment** — do implementation READMEs accurately reflect what the documentation repo's feature specs define?
+4. **Cross-repo example scenario coverage** — compare example scenario inventories across implementation repos:
+   - Each scenario present in one implementation should exist in ALL implementations
+   - Missing scenario → WARNING: `"{scenario}" exists in {repo-A} examples but missing from {repo-B}`
+   - Scenarios should demonstrate equivalent behavior (same API flow, same inputs → same outputs)
+5. **Cross-repo test scenario coverage** — compare test scenario inventories across implementation repos:
+   - For each feature area, compare the set of test scenarios across all implementations
+   - Missing test scenario → WARNING: `"test_{scenario}" exists in {repo-A} but missing from {repo-B}"`
+   - Missing feature area → CRITICAL: `"No tests for {feature_area} in {repo-B}, but {repo-A} has {N} tests"`
+   - Report a cross-language test coverage matrix:
+     ```
+     Test Coverage Matrix:
+       Feature Area      | Python | TypeScript | Rust
+       registry          |   12   |     10     |   8   ⚠ missing: scan_glob, bulk_register
+       executor          |    8   |      8     |   8   ✓
+       config            |    5   |      3     |   5   ⚠ missing: env_override, nested_merge
+     ```
 
 ---
 
@@ -655,18 +705,33 @@ After collecting all per-repo findings, the main context performs cross-repo che
 
 --- Implementation Repos ---
 
-  Repo                    | README | API Refs | Examples | Cross-Doc
-  apcore-python           |  PASS  |   PASS   |    —     |   PASS
-  apcore-typescript       |  WARN  |   FAIL   |    —     |   FAIL
-  apcore-rust             |  PASS  |   PASS   |    —     |   PASS
-  apcore-mcp-python       |  PASS  |   PASS   |    —     |   PASS
-  apcore-mcp-typescript   |  WARN  |   PASS   |    —     |   PASS
+  Repo                    | README | API Refs | Examples | Tests  | Cross-Doc
+  apcore-python           |  PASS  |   PASS   |  PASS    |  PASS  |   PASS
+  apcore-typescript       |  WARN  |   FAIL   |  WARN    |  WARN  |   FAIL
+  apcore-rust             |  PASS  |   PASS   |  PASS    |  PASS  |   PASS
+  apcore-mcp-python       |  PASS  |   PASS   |  PASS    |  PASS  |   PASS
+  apcore-mcp-typescript   |  WARN  |   PASS   |  PASS    |  WARN  |   PASS
 
   MISMATCHES:
     ❌ apcore-typescript README Quick Start uses `findModule()`
        but verified API says `getModule()`
     ❌ apcore-typescript docs/usage.md says `execute(moduleId, input)`
        but verified API says `execute(moduleId, input, context?)`
+
+--- Cross-Repo Examples ---
+
+  Example scenario coverage:
+    "basic_usage":     Python ✓  TypeScript ✓  Rust ✓
+    "custom_config":   Python ✓  TypeScript ✗  Rust ✓
+    "error_handling":  Python ✓  TypeScript ✓  Rust ✗
+
+--- Cross-Repo Tests ---
+
+  Test Coverage Matrix:
+    Feature Area      | Python | TypeScript | Rust
+    registry          |   12   |     10     |   8   ⚠ missing: scan_glob, bulk_register
+    executor          |    8   |      8     |   8   ✓
+    config            |    5   |      3     |   5   ⚠ missing: env_override, nested_merge
 
 --- Cross-Repo ---
 
@@ -705,10 +770,12 @@ Doc repo internal:
   {doc-repo}: {N} contradictions, {N} gaps
 
 Implementation repo docs:
-  Repo                  | README | API Refs | Examples | Cross-Doc
+  Repo                  | README | API Refs | Examples | Tests  | Cross-Doc
   (matrix)
 
-Cross-repo: {N} contradictions
+Cross-repo examples: {N} missing scenarios
+Cross-repo tests: {N} missing scenarios, {N} missing feature areas
+Cross-repo contradictions: {N}
 
 ═══ COMBINED FINDINGS (sorted by severity) ═══
 
@@ -866,11 +933,12 @@ PHASE A FIXES (code):
    - Run the full test suite: {pytest --tb=short -q | npx vitest run}
    - If any test fails due to a fix: revert ONLY that specific fix and note it
 
-PHASE B FIXES (docs):
+PHASE B FIXES (docs, examples, tests):
 4. README FIXES — Add missing sections, update API names to match verified API, update version references
 5. API REFERENCE FIXES — Update symbol names, param names, import paths in all markdown files
-6. EXAMPLE FIXES — Update API usage and dependency versions in example code
-7. CONTRADICTION FIXES — Resolve contradictions by aligning all docs to verified API
+6. EXAMPLE FIXES — Update API usage and dependency versions in example code. For missing example scenarios identified in cross-repo comparison: generate stub example files with TODO markers showing expected scenario.
+7. TEST FIXES — Update API usage in tests to match verified API (renamed methods, updated params). For missing test scenarios identified in cross-repo comparison: generate test stub files with TODO markers showing expected test cases and the reference implementation's test for guidance.
+8. CONTRADICTION FIXES — Resolve contradictions by aligning all docs to verified API
 
 After all fixes:
 1. List all files modified with a summary of changes
@@ -881,7 +949,7 @@ Error handling: If test runner is not available, skip verification and note it.
 Return:
 REPO: {repo-name}
 PHASE_A_FIXES: {count} (naming: {n}, stubs: {n})
-PHASE_B_FIXES: {count} (readme: {n}, api-refs: {n}, examples: {n}, contradictions: {n})
+PHASE_B_FIXES: {count} (readme: {n}, api-refs: {n}, examples: {n}, tests: {n}, contradictions: {n})
 TEST_RESULT: {pass|fail|skipped}
 TEST_COUNTS: {passed}/{total}
 REVERTED_FIXES: {list or "none"}
@@ -937,12 +1005,12 @@ Wait for all sub-agents to complete. Display consolidated results:
 Auto-fix results:
 
 Implementation repos:
-  apcore-typescript: Phase A: 3 naming fixes, 1 stub | Phase B: 2 readme fixes
+  apcore-typescript: Phase A: 3 naming fixes, 1 stub | Phase B: 2 readme, 1 example, 2 test fixes
     Tests: 287/287 ✓
-    Files: 5 changed
-  apcore-mcp-typescript: Phase A: 1 naming fix | Phase B: 0
+    Files: 8 changed
+  apcore-mcp-typescript: Phase A: 1 naming fix | Phase B: 0 readme, 0 example, 1 test fix
     Tests: 112/112 ✓
-    Files: 1 changed
+    Files: 2 changed
 
 Documentation repos:
   apcore: 2 contradiction fixes, 1 flagged for manual review
