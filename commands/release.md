@@ -4,6 +4,6 @@ argument-hint: "<version> [--scope core|mcp|integrations|all] [--dry-run]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
-Invoke the apcore-skills:release skill and follow it exactly as presented to you.
-
 The user invoked this command with: $ARGUMENTS
+
+@../skills/release/SKILL.md

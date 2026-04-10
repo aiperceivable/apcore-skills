@@ -4,6 +4,6 @@ argument-hint: "[repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|al
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
-Invoke the apcore-skills:sync skill and follow it exactly as presented to you.
-
 The user invoked this command with: $ARGUMENTS
+
+@../skills/sync/SKILL.md

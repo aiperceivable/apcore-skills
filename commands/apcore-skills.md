@@ -82,10 +82,10 @@ Use `AskUserQuestion` to ask what to do next.
 
 ### Route B: Subcommand dispatch
 
-For recognized subcommands, invoke the corresponding skill:
-- `sync` → invoke `apcore-skills:sync` skill
-- `sdk` → invoke `apcore-skills:sdk` skill
-- `integration` → invoke `apcore-skills:integration` skill
-- `audit` → invoke `apcore-skills:audit` skill
-- `release` → invoke `apcore-skills:release` skill
-- `tester` → invoke `apcore-skills:tester` skill
+For recognized subcommands, read and execute the corresponding SKILL.md directly (do NOT call the Skill tool — that would cause a recursive loop):
+- `sync` → read and execute `../skills/sync/SKILL.md`
+- `sdk` → read and execute `../skills/sdk/SKILL.md`
+- `integration` → read and execute `../skills/integration/SKILL.md`
+- `audit` → read and execute `../skills/audit/SKILL.md`
+- `release` → read and execute `../skills/release/SKILL.md`
+- `tester` → read and execute `../skills/tester/SKILL.md`

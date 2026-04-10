@@ -4,6 +4,6 @@ argument-hint: "[<repos...>] [--spec <feature>] [--mode generate|run|full] [--ca
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
-Invoke the apcore-skills:tester skill and follow it exactly as presented to you.
-
 The user invoked this command with: $ARGUMENTS
+
+@../skills/tester/SKILL.md
