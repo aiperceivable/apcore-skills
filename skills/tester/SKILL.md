@@ -10,7 +10,7 @@ description: >
 instructions: >
   This skill generates and runs tests — it does NOT implement production code.
   When a test fails, the output is a failing test case (Bug-as-failing-test),
-  not a code fix. Fixes are delegated to code-forge:tdd or code-forge:fixbug.
+  not a code fix. Fixes are delegated to code-forge:tdd or code-forge:fix.
 ---
 
 # Apcore Skills — Tester
@@ -425,7 +425,7 @@ Spec sources: {spec_repo_names and doc counts}
 ═══ FAILING TESTS AS BUG REPORTS ═══
 
   {count} failing tests written to repos as executable bug reports.
-  To fix: run /code-forge:fixbug in the affected repo.
+  To fix: run /code-forge:fix in the affected repo.
   To re-verify after fix: run /apcore-skills:tester --mode run
 ```
 
@@ -440,6 +440,6 @@ If `--save` flag: write full report to specified path.
 | `apcore-skills:audit` | Audit checks static consistency. Tester checks runtime consistency. Run audit first for structural alignment, then tester for behavioral verification. |
 | `apcore-skills:sync` | Sync verifies spec ↔ implementation alignment at the API surface level. Tester verifies at the behavioral level. Sync findings can inform which spec clauses need extra test coverage. |
 | `code-forge:tdd` | Tester generates the test suite. When a test fails, `code-forge:tdd` is used to implement the fix (red → green → refactor). |
-| `code-forge:fixbug` | When tester finds a behavioral inconsistency, the failing test IS the bug report. `fixbug` traces the root cause and applies the TDD fix. |
+| `code-forge:fix` | When tester finds a behavioral inconsistency, the failing test IS the bug report. `fix` traces the root cause and applies the TDD fix. |
 | `code-forge:verify` | After fixes are applied, `verify` ensures the claim "tests pass" is backed by fresh evidence. |
 | `apcore-skills:sdk` | When a new SDK is bootstrapped, tester generates its full test suite from the spec, giving immediate coverage of the protocol contract. |

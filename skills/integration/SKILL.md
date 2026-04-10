@@ -117,7 +117,7 @@ Integration Bootstrap:
 
 ### Step 2: Analyze Reference Integration (Sub-agent)
 
-Spawn `Task(subagent_type="general-purpose")`:
+Spawn `Agent(subagent_type="general-purpose")`:
 
 **Sub-agent prompt:**
 ```
@@ -198,7 +198,7 @@ Store `framework_config`.
 
 @../shared/conventions.md (refer to "Framework Integration structure" section)
 
-Spawn `Task(subagent_type="general-purpose")`:
+Spawn `Agent(subagent_type="general-purpose")`:
 
 **Sub-agent prompt:**
 ```
@@ -338,13 +338,18 @@ Feature specs to generate (one per core capability):
 
 Write to `{target-path}/docs/features/`.
 
-**Git initialization is left to the user.** Display:
+Initialize git and create the skeleton commit automatically:
+
+```bash
+cd {target-path}
+git init
+git add .
+git commit -m "chore: initialize {framework}-apcore project skeleton"
 ```
-Project scaffolded. To initialize git:
-  cd {target-path}
-  git init
-  git add <files...>
-  git commit -m "chore: initialize {framework}-apcore project skeleton"
+
+Display:
+```
+Git initialized with skeleton commit.
 ```
 
 ---

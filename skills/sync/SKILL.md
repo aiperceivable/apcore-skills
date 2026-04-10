@@ -234,78 +234,9 @@ Verify that the documentation repo's feature specs and protocol spec match what 
 
 ### Step 2: Extract Public APIs (Parallel Sub-agents — One per Implementation Repo)
 
-Spawn one `Task(subagent_type="general-purpose")` **per implementation repo, all simultaneously in a single round of parallel Task calls**. Each sub-agent extracts the public API from one repo independently. Do NOT process repos sequentially.
+Spawn one `Agent(subagent_type="general-purpose")` **per implementation repo, all simultaneously in a single round of parallel Agent calls**. Each sub-agent extracts the public API from one repo independently. Do NOT process repos sequentially.
 
-**Sub-agent prompt:**
-
-```
-Extract the complete public API surface from {repo_path}.
-
-Follow the API Extraction Protocol:
-
-1. Read the main export file:
-   - Python: src/{package}/__init__.py — extract all imports and __all__
-   - TypeScript: src/index.ts — extract all export statements
-
-2. For each exported symbol, read its source file and extract:
-   - Kind: class | function | type | enum | constant | interface
-   - Name (in this language's convention)
-   - For classes: constructor params (name, type, required, default), all public methods with full signatures
-   - For functions: params (name, type, required, default), return type, async flag
-   - For enums: all member names and values
-   - For types/interfaces: all fields (name, type, required)
-   - For constants: name, type, value
-
-3. Also extract:
-   - Error classes: name, error code, parent class
-   - Middleware interfaces: method signatures
-   - Extension points: discoverer, validator, exporter interfaces
-   - **Trait/interface implementations**: for each public class, the list of trait/interface contracts it satisfies (e.g., Rust `impl Display for Registry`, Python `class Registry(Hashable)`, Go `func (r *Registry) String() string`, TS `class Registry implements Serializable`). Use the equivalence table in Step 4.2 item 4 to recognize idiomatic forms.
-   - **Multi-constructor patterns**: for each public class, the list of all construction paths (Rust `impl Self { fn new; fn with_…; fn from_… }`; Python `__init__` + every `@classmethod` factory; Go every `NewX*` function in the same package; TS constructor + static factories). Return as `constructors: [{name, params, return_type}, ...]`.
-   - **Algorithm checkpoint markers**: for each public method body, grep for `checkpoint:[a-z_][a-z0-9_]*` literal strings (in `logger.debug` / `tracing::debug!` / `slog.Debug` / `span.AddEvent` / `tracer.startSpan` calls). Return them in source order as a `skeleton` field on each method object: `methods: [{name: "...", skeleton: [checkpoint_1, checkpoint_2, ...]}]`. Top-level functions get a sibling `skeleton` field. Do NOT invent — only report literally found markers. If none found for a method, return an empty list (`skeleton: []`).
-
-Return a structured summary in this exact format:
-
-REPO: {repo-name}
-LANGUAGE: {language}
-VERSION: {version}
-EXPORT_COUNT: {N}
-
-CLASSES:
-- {ClassName}
-  constructors:
-    - {ctor_name}({param1}: {type1}, {param2}: {type2} = {default})
-    - {factory_name}({params}) -> Self
-  methods:
-    - {method_name}({params}) -> {return_type} [async]
-      skeleton: [checkpoint_1, checkpoint_2, ...]
-    - ...
-  trait_impls:
-    - {ContractName}  (e.g., Display, Clone, Serialize, Iterator)
-
-FUNCTIONS:
-- {function_name}({params}) -> {return_type} [async]
-  skeleton: [checkpoint_1, checkpoint_2, ...]
-
-ENUMS:
-- {EnumName}: {MEMBER1}={value1}, {MEMBER2}={value2}, ...
-
-TYPES:
-- {TypeName}: {field1}: {type1}, {field2}: {type2}, ...
-
-ERRORS:
-- {ErrorName}(code={CODE}, parent={ParentError})
-
-CONSTANTS:
-- {NAME}: {type} = {value}
-
-Error handling:
-- If the repo path does not exist, return: REPO: {repo-name}, STATUS: NOT_FOUND
-- If the main export file is missing or empty, return: REPO: {repo-name}, STATUS: NO_EXPORTS, REASON: {description}
-- If individual source files cannot be read, skip them and note in the summary
-
-Keep the summary concise but complete. Target ~3-5KB.
-```
+**Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`, filling in `{repo_path}` and `{package}` for each repo.
 
 **Main context retains:** Each repo's structured API summary. Store as `api_summaries[repo_name]`.
 
@@ -605,253 +536,11 @@ Spawn sub-agents in parallel: **one per documentation repo** + **one per impleme
 
 #### Sub-agent for Documentation Repo (apcore/ or apcore-mcp/)
 
-**Sub-agent prompt:**
-
-```
-Audit internal documentation consistency in {doc_repo_path}.
-
-This is a DOCUMENTATION REPO containing specs and feature definitions. Check that
-all documents are internally consistent — no contradictions between layers.
-
-=== SCOPE 1: Spec Chain Consistency ===
-
-Read all available documents from the spec chain:
-- PRD (if exists): docs/prd.md or similar
-- SRS (if exists): docs/srs.md or similar
-- Tech Design (if exists): docs/tech-design.md or similar
-- Test Cases (if exists): docs/test-cases.md or similar
-- Feature Specs: docs/features/*.md
-- Protocol Spec (if exists): PROTOCOL_SPEC.md
-
-For each API symbol (class, function, parameter, return type) mentioned across multiple documents:
-1. Collect ALL references: which document, what section, what it says
-2. Compare: do all documents agree on the symbol's name, parameters, behavior, and types?
-3. Flag contradictions:
-   - PRD says feature X has capability A, but feature spec says no such capability
-   - SRS requirement REQ-001 references function foo(), but tech design calls it bar()
-   - Test plan tests for param "timeout" but feature spec defines it as "max_wait"
-   - Feature spec A says Registry has method scan(), feature spec B says it's discover()
-
-=== SCOPE 2: Feature Spec Completeness ===
-
-For each feature spec in docs/features/:
-1. Does it define clear API symbols (classes, functions, params, return types)?
-2. Are there features mentioned in PRD/SRS that have NO corresponding feature spec?
-3. Are there feature specs that are NOT referenced by any higher-level document?
-
-=== SCOPE 3: Cross-Document Reference Integrity ===
-
-Check all internal cross-references:
-1. Do documents reference sections/features that actually exist?
-2. Are version numbers consistent across documents?
-3. Are terminology and naming consistent (same concept uses same name everywhere)?
-
-=== SCOPE 4: Documentation Code Example Correctness ===
-
-Extract ALL fenced code blocks from docs/**/*.md files (getting-started.md, api/*.md,
-features/*.md, guides/*.md). For each code block:
-
-1. Identify the language (from the fenced block language tag: python, typescript, rust)
-2. Extract API calls — class instantiation, method invocations, function calls, imports
-3. Cross-reference each extracted symbol against the VERIFIED API from Phase A:
-   a. Does the class/function exist in the verified API?
-   b. Does the method exist on the class?
-   c. Does the argument COUNT match the verified signature? (e.g., `call(a, b)` but
-      verified signature is `call(a, b, c, d)` → FAIL: missing args)
-   d. For Rust examples: does the code use `Box::new(...)` where the API expects
-      `Box<dyn Trait>`? Does it use `.await` on async methods? Does it use `?` for
-      Result returns? Does it use `let mut` when calling `&mut self` methods?
-   e. For TypeScript examples: does it use `await` on async/Promise methods?
-   f. Does the import path match what the SDK actually exports?
-
-4. Cross-reference code blocks in the SAME section across language tabs:
-   - If the Python tab calls `client.call("math.add", {"a": 1})` and the Rust tab
-     calls `client.call("math.add", json!({"a": 1}))`, do both pass the same number
-     of arguments? (Rust may have extra None/None for optional params)
-   - Are all three language tabs present where the project's documentation rules
-     require them? (Cross-language example convention)
-
-5. Check for language-specific API adaptations documented in client-api.md §10:
-   - If a Rust example calls `.use()` — that is a reserved keyword, should be `.use_middleware()`
-   - If a Rust example shows `futures::StreamExt` — verify `futures` is in Cargo.toml
-   - If a Rust example uses a proc-macro `#[apcore::module]` — verify it actually exists
-
-Severity:
-- Code example references a non-existent method or class → critical
-- Argument count mismatch (fewer args than required params) → critical
-- Missing `await`/`?`/`Box::new` in Rust/TypeScript → warning
-- Missing language tab where cross-language tabs are required → warning
-- Import path incorrect → warning
-
-=== SCOPE 5: Deprecated API Detection in Examples ===
-
-Using the deprecated_api list from Step 3 (extracted from CHANGELOG.md):
-
-1. For each deprecated or removed symbol, grep ALL docs/**/*.md files for references
-2. If a code example uses a symbol that was listed under `### Removed` in any
-   CHANGELOG version up to and including the current version → critical
-3. If a code example uses a symbol listed under `### Deprecated` → warning
-
-This catches the pattern where a CHANGELOG removes an event name (e.g., `module_health_changed`)
-but a docs/features/*.md example still references it.
-
-Return findings in this exact format:
-DOC_REPO: {repo-name}
-DOCUMENTS_FOUND: {list of documents checked with paths}
-
-SPEC_CHAIN:
-  LAYERS_CHECKED: {list: prd, srs, tech-design, test-cases, feature-specs, protocol-spec}
-  CONTRADICTIONS: {N}
-  GAPS: {N}
-
-FINDING_COUNT: {N}
-FINDINGS:
-- severity: {critical|warning|info}
-  scope: {spec-chain|completeness|cross-ref|code-example|deprecated-api}
-  detail: {description}
-  locations:
-    - {file1:section} says: "{quote1}"
-    - {file2:section} says: "{quote2}"
-  contradiction: {what disagrees}
-  fix: {which document should be authoritative and what to change}
-
-CODE_EXAMPLES:
-  FILES_SCANNED: {N}
-  CODE_BLOCKS_CHECKED: {N}
-  API_MISMATCHES: {N}
-  MISSING_LANG_TABS: {N}
-  DEPRECATED_REFS: {N}
-
-Error handling:
-- If the documentation repo path does not exist, return: DOC_REPO: {repo-name}, STATUS: NOT_FOUND
-- If no spec chain documents are found (no PRD, SRS, tech design, feature specs), return: DOC_REPO: {repo-name}, STATUS: NO_DOCS, DOCUMENTS_FOUND: []
-- If individual files cannot be read, skip them and list in DOCUMENTS_FOUND as "{path} (unreadable)"
-- If CHANGELOG.md is missing or has no Removed/Deprecated sections, skip SCOPE 5 and report DEPRECATED_REFS: 0
-```
+**Sub-agent prompt:** Use the template from `@references/audit-doc-repo-prompt.md`, filling in `{doc_repo_path}`, injecting `{verified_api}` from Step 4.4, and `{deprecated_api}` from Step 3.
 
 #### Sub-agent for Implementation Repo (apcore-python/, apcore-typescript/, etc.)
 
-**Sub-agent prompt:**
-
-```
-Audit documentation in {impl_repo_path} for consistency with the verified API surface.
-
-This is an IMPLEMENTATION REPO. It should contain only code and a README (plus optional examples).
-It does NOT contain PRD/SRS/Tech Design/Test Plan/Feature Specs.
-
-VERIFIED API (ground truth from Phase A):
-{verified_api for this repo — the confirmed-correct API symbols, signatures, types}
-
-=== SCOPE 1: README ===
-
-1. Read README.md
-2. Check required sections: Title/badges, Description, Installation, Quick Start, Features, API Overview, Docs link, License
-3. For Installation: verify package name matches build config (pyproject.toml/package.json)
-4. For Quick Start code examples: extract all API references, verify they match verified API
-   - Import names correct?
-   - Class names correct?
-   - Method names correct?
-   - Parameter names and order correct?
-5. For API Overview: verify listed classes/functions exist in verified API with correct descriptions
-6. For version references: verify they match current version in build config
-
-=== SCOPE 2: API References in Markdown ===
-
-Search ALL markdown files in the repo (README.md, docs/**/*.md) for API symbol references:
-1. For EACH symbol reference found:
-   a. Does the symbol exist in the verified API?
-   b. Do parameter names/order match the verified signature?
-   c. Are import paths correct?
-   d. Are return types correctly described?
-2. Cross-check: do different markdown files contradict each other?
-   - If README says `get_module(id)` but docs/usage.md says `get_module(module_id)` → CONTRADICTION
-
-=== SCOPE 3: Example Code ===
-
-1. Scan examples/, demo/, example/ directories
-2. For each example source file (*.py, *.ts, *.js):
-   a. Extract import statements and API usage
-   b. Cross-reference against verified API — correct class names, method names, params?
-   c. Check dependency versions reference correct SDK version
-3. Check example README exists with setup instructions
-4. Build an inventory of example scenarios (list each example by purpose/scenario name):
-   - e.g., "basic_usage", "custom_config", "middleware_chain", "error_handling"
-   - Include this inventory in the EXAMPLES section of the return format below
-
-=== SCOPE 4: Test Consistency ===
-
-1. Scan tests/, test/, __tests__/, spec/ directories
-2. Build a test scenario inventory:
-   a. For each test file, extract:
-      - Test file name (normalized: test_registry.py → registry, registry.test.ts → registry)
-      - Test case names/descriptions (normalized to snake_case for comparison)
-      - API symbols under test (which classes/functions/methods each test exercises)
-   b. Group by feature area (registry, executor, config, etc.)
-   c. For parameterized/table-driven tests, expand each parameter set as a separate scenario in the inventory. For pytest.mark.parametrize, each parameter tuple is one scenario. For test.each/it.each, each row is one scenario. This ensures fair cross-language comparison.
-3. Cross-reference test API usage against verified API:
-   a. Are class names, method names, and params correct?
-   b. Are deprecated or renamed APIs still used in tests?
-4. Include all extracted data in the TESTS section of the return format below
-
-=== SCOPE 5: Cross-Document Contradiction Detection ===
-
-For every API symbol mentioned in more than one place within this repo:
-1. Collect all references (file, line, what it says)
-2. Compare: do all references agree on name, params, behavior?
-3. Flag any contradictions between documents
-
-Return findings in this exact format:
-REPO: {repo-name}
-
-README:
-  SECTIONS_PRESENT: {list}
-  SECTIONS_MISSING: {list}
-  API_MISMATCHES: {list of references that don't match verified API}
-  VERSION_MISMATCHES: {list}
-  INSTALL_CORRECT: true|false
-
-API_REFS:
-  REFERENCES_CHECKED: {N}
-  MISMATCHES: {N}
-
-EXAMPLES:
-  EXAMPLE_DIRS: {list or "none"}
-  MISMATCHES: {N}
-  SCENARIO_INVENTORY:
-  - {scenario_name}: {brief description}
-  - ...
-
-TESTS:
-  TEST_DIRS: {list or "none"}
-  TOTAL_TEST_FILES: {N}
-  TOTAL_TEST_CASES: {N}
-  API_MISMATCHES: {N}
-  FEATURE_AREAS: {list with test counts}
-  SCENARIO_INVENTORY:
-  - area: {feature_area}
-    tests: [{test_name_1}, {test_name_2}, ...]
-  - ...
-
-CONTRADICTIONS: {N}
-  {list of cases where different docs within this repo say different things}
-
-FINDING_COUNT: {N}
-FINDINGS:
-- severity: {critical|warning|info}
-  scope: {readme|api-refs|examples|tests|contradiction}
-  detail: {description}
-  location: {file:section or file:line}
-  verified_api_says: {correct value from Phase A}
-  doc_says: {what the doc currently says}
-  fix: {suggested fix}
-
-Error handling:
-- If the repo path does not exist, return: REPO: {repo-name}, STATUS: NOT_FOUND
-- If README.md is missing, report SECTIONS_PRESENT: [], SECTIONS_MISSING: ["all"], and continue checking other scopes
-- If no markdown files are found, skip API_REFS scope and report REFERENCES_CHECKED: 0
-- If no example directories exist, report EXAMPLE_DIRS: "none", MISMATCHES: 0, SCENARIO_INVENTORY: []
-- If no test directories exist, report TEST_DIRS: "none", TOTAL_TEST_FILES: 0, TOTAL_TEST_CASES: 0, SCENARIO_INVENTORY: []
-```
+**Sub-agent prompt:** Use the template from `@references/audit-impl-repo-prompt.md`, filling in `{impl_repo_path}` and injecting the `{verified_api}` for that repo from Step 4.4.
 
 **Main context retains:** Structured findings per repo.
 
@@ -880,8 +569,6 @@ After collecting all per-repo findings, the main context performs cross-repo che
        executor          |    8   |      8     |   8   ✓
        config            |    5   |      3     |   5   ⚠ missing: env_override, nested_merge
      ```
-
----
 
 ---
 
@@ -1072,11 +759,11 @@ If `--save` flag: write report to `{ecosystem_root}/sync-report-{date}.md`.
 
 #### 9.1 Review-Compatible Issue Report
 
-**After the Combined Report, ALWAYS append a review-compatible report so that `/code-forge:fixbug --review` can directly consume it.**
+**After the Combined Report, ALWAYS append a review-compatible report so that `/code-forge:fix --review` can directly consume it.**
 
 Convert all CRITICAL and WARNING findings from both phases into `code-forge:review` format. Format follows `code-forge:review` output schema (see `code-forge/skills/review/SKILL.md`). If the review format changes, update this mapping accordingly.
 
-Use the `# Project Review:` header with a **dynamic scope description** (derived from Step 1 — e.g., repo name, scope group, or "all") and structured issue entries. Output the review-compatible report as **raw markdown** (not inside a fenced code block) so that fixbug can parse it from the conversation context.
+Use the `# Project Review:` header with a **dynamic scope description** (derived from Step 1 — e.g., repo name, scope group, or "all") and structured issue entries. Output the review-compatible report as **raw markdown** (not inside a fenced code block) so that code-forge:fix can parse it from the conversation context.
 
 ```markdown
 # Project Review: {scope_description}
@@ -1105,7 +792,7 @@ Use the `# Project Review:` header with a **dynamic scope description** (derived
 **Rules:**
 - Group issues by file for efficient batch fixing
 - The `file` field MUST point to the **implementation or doc file that needs changing** (not the spec file)
-- The `suggestion` field MUST be concrete enough for fixbug to act on directly (e.g., "Rename `findModule` to `getModule` to match spec" rather than "fix naming")
+- The `suggestion` field MUST be concrete enough for code-forge:fix to act on directly (e.g., "Rename `findModule` to `getModule` to match spec" rather than "fix naming")
 - For missing API stubs, include the expected signature from the spec in the `suggestion`
 - For doc mismatches, include the correct value from `verified_api` in the `suggestion`
 
@@ -1159,138 +846,11 @@ _(No actionable issues found — all checks passed.)_
 
 ### Step 10: Auto-Fix (only with --fix flag)
 
-Group all findings from both phases by repo. Spawn one `Task(subagent_type="general-purpose")` **per repo that has fixable findings, all in parallel**.
+Group all findings from both phases by repo. Spawn one `Agent(subagent_type="general-purpose")` **per repo that has fixable findings, all in parallel**.
 
-**Sub-agent prompt for implementation repos:**
-
-```
-Apply sync fixes for {repo_path} ({language}).
-
-Phase A findings to fix:
-{naming, missing, type issues from Phase A}
-
-Phase B findings to fix:
-{readme, api-ref, examples issues from Phase B}
-
-Fix rules (apply in order):
-
-PHASE A FIXES (code):
-1. NAMING FIXES — For each naming inconsistency:
-   - Canonical name: {canonical} → language convention: {expected_name}
-   - Rename the function/method/class in its source file using Edit
-   - Update the export in __init__.py / index.ts
-   - Update any internal references within the same repo
-
-2. MISSING API STUBS — For each missing symbol:
-   - Generate a stub implementation in {language} with TODO markers
-   - Match the signature from the spec (canonical form)
-   - Add the export to the main module file
-   - Create a corresponding test stub in tests/
-
-3. MISSING TRAIT/INTERFACE SATISFACTION — For each missing contract:
-   - Look up the language's idiomatic mechanism in Step 4.2 item 4 equivalence table
-     (e.g., `Display` → Python `__str__`, TS `toString()`, Go `String() string`, Rust `impl Display`, Java `toString()`)
-   - Generate a stub implementation with a TODO marker explaining the contract
-   - For Rust derive-eligible contracts (`Clone`, `Debug`, `PartialEq`, `Hash`, `Default`, `Serialize`), prefer adding the appropriate `#[derive(...)]` attribute
-   - Add a corresponding test asserting the contract is satisfied (e.g., `str(obj)` returns non-empty)
-
-4. MISSING CONSTRUCTOR VARIANT — For each spec-declared constructor missing from the implementation:
-   - Generate a stub matching the spec signature, using the language's idiomatic factory mechanism
-     (Python `@classmethod`, TS `static`, Go `NewX*` function in same package, Rust `impl Self { fn with_… }`, Java `static` factory or overloaded constructor)
-   - Add to the main export and create a test stub
-
-5. MISSING CHECKPOINT INSTRUMENTATION — For each method whose implementation has no checkpoint markers but spec declares an `## Algorithm` section:
-   - For each spec-declared checkpoint, insert a logger/tracer call at the textually appropriate position in the method body, using the language-specific marker form from Step 4A's table
-     (Python `logger.debug("checkpoint:NAME")`, TS `logger.debug("checkpoint:NAME")`, Go `slog.Debug("checkpoint:NAME")`, Rust `tracing::debug!("checkpoint:NAME")`, Java `logger.debug("checkpoint:NAME")`)
-   - Position is BEST-EFFORT — insert the marker just before the line that performs the named work, when identifiable
-   - If position cannot be inferred from existing code, group all markers at the top of the method body in spec order, with a TODO comment
-
-6. CHECKPOINT REORDERING — **MANUAL REVIEW ONLY, do NOT auto-fix.**
-   - If implementation order differs from spec order, the algorithm semantics may differ deliberately. Reordering checkpoints could introduce a bug.
-   - Add the finding to MANUAL_REVIEW_ITEMS with the diff and let the operator decide whether the spec or the implementation is correct.
-
-7. VERIFY — After all Phase A fixes:
-   - Run the full test suite: {pytest --tb=short -q | npx vitest run}
-   - If any test fails due to a fix: revert ONLY that specific fix and note it
-
-PHASE B FIXES (docs, examples, tests):
-8. README FIXES — Add missing sections, update API names to match verified API, update version references
-9. API REFERENCE FIXES — Update symbol names, param names, import paths in all markdown files
-10. EXAMPLE FIXES — Update API usage and dependency versions in example code. For missing example scenarios identified in cross-repo comparison: generate stub example files with TODO markers showing expected scenario.
-11. TEST FIXES — Update API usage in tests to match verified API (renamed methods, updated params). For missing test scenarios identified in cross-repo comparison: generate test stub files with TODO markers showing expected test cases and the reference implementation's test for guidance.
-12. CONTRADICTION FIXES — Resolve contradictions by aligning all docs to verified API
-13. BEHAVIORAL DIVERGENCE — **MANUAL REVIEW ONLY, do NOT auto-fix.**
-    - Add tester divergence findings to MANUAL_REVIEW_ITEMS with the failing input/output diff. Behavioral fixes require understanding spec intent, not pattern matching.
-
-After all fixes:
-1. List all files modified with a summary of changes
-2. Do NOT commit — leave changes for user review
-
-Error handling: If test runner is not available, skip verification and note it.
-
-Return:
-REPO: {repo-name}
-PHASE_A_FIXES: {count} (naming: {n}, stubs: {n}, traits: {n}, constructors: {n}, checkpoints: {n})
-PHASE_B_FIXES: {count} (readme: {n}, api-refs: {n}, examples: {n}, tests: {n}, contradictions: {n})
-TEST_RESULT: {pass|fail|skipped}
-TEST_COUNTS: {passed}/{total}
-REVERTED_FIXES: {list or "none"}
-MANUAL_REVIEW_ITEMS: {list — checkpoint reorderings, behavioral divergences, ambiguous trait stubs}
-FILES_MODIFIED: {list}
-```
-
-**Sub-agent prompt for documentation repos:**
-
-```
-Apply documentation consistency fixes for {doc_repo_path}.
-
-Phase B findings to fix:
-{spec chain contradictions, completeness gaps, cross-ref issues from Phase B}
-
-Fix rules:
-
-1. SPEC CHAIN CONTRADICTIONS — For each contradiction between documents:
-   - Identify which document is the higher-authority source:
-     Authority order: Feature Specs > Tech Design > SRS > PRD
-     (Feature specs are closest to implementation, PRD is most abstract)
-   - Update the lower-authority document to match the higher-authority one
-   - If the contradiction is between documents at the same level: flag for manual review, do NOT auto-fix
-
-2. COMPLETENESS GAPS — For features mentioned in PRD/SRS but missing feature specs:
-   - Do NOT generate feature specs automatically (too complex for auto-fix)
-   - Add a TODO note in the appropriate location
-
-3. CROSS-REFERENCE FIXES — Fix broken internal references:
-   - Update section references to point to correct locations
-   - Fix terminology inconsistencies to use the canonical name
-
-4. CODE EXAMPLE FIXES — For each code example mismatch found in SCOPE 4:
-   - Fix method names, parameter counts, and import paths to match verified API
-   - Add missing `await`, `?`, `Box::new()`, `let mut` as needed for Rust/TypeScript
-   - Add missing language tabs where cross-language convention requires them
-   - Replace deprecated API references with their canonical replacements from CHANGELOG
-
-5. DEPRECATED API CLEANUP — For each deprecated/removed API reference found in SCOPE 5:
-   - Replace with the canonical replacement symbol (look up in CHANGELOG's corresponding Added/Changed section)
-   - If no replacement exists, remove the example or mark with an admonition
-
-After all fixes:
-1. List all files modified
-2. Do NOT commit
-
-Error handling:
-- If the doc repo path does not exist, return: DOC_REPO: {repo-name}, STATUS: NOT_FOUND
-- If a file is unwritable, skip it and list in MANUAL_REVIEW_ITEMS
-- If same-level contradiction (ambiguous authority): flag for manual review, do NOT auto-fix
-
-Return:
-DOC_REPO: {repo-name}
-FIXES_APPLIED: {count}
-FLAGGED_FOR_MANUAL_REVIEW: {count}
-FILES_MODIFIED: {list}
-MANUAL_REVIEW_ITEMS:
-- {description of what needs human decision}
-```
+**Sub-agent prompts:** Use the templates from `@references/fix-prompts.md`. The file contains two prompt templates:
+- **Fix Implementation Repo** — for each implementation repo with findings, fill in `{repo_path}`, `{language}`, and inject the Phase A/B findings.
+- **Fix Documentation Repo** — for each documentation repo with findings, fill in `{doc_repo_path}` and inject the Phase B findings.
 
 Wait for all sub-agents to complete. Display consolidated results:
 

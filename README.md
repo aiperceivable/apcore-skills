@@ -9,7 +9,7 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
-| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--save]` | Cross-language API + documentation consistency check & fix |
+| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|skeleton\|behavior] [--save]` | Cross-language API + documentation consistency check & fix |
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
 | `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--save report.md]` | Deep cross-repo consistency audit |
@@ -67,6 +67,6 @@ The apcore ecosystem consists of:
 - **spec-forge** — Generate specifications for new features before implementing
 - **code-forge:plan / code-forge:impl** — Plan and implement features within individual repos
 - **code-forge:port** — Port features from one language SDK to another
-- **code-forge:tdd / code-forge:fixbug** — Fix failures surfaced by `tester` via TDD red-green cycle
+- **code-forge:tdd / code-forge:fix** — Fix failures surfaced by `tester` via TDD red-green cycle
 - **code-forge:verify** — Verify test results before claiming fixes are complete
 - **apcore-skills** — Ecosystem-level operations that span multiple repos

@@ -1,7 +1,7 @@
 ---
 description: "Apcore ecosystem dashboard — ONLY when user explicitly invokes /apcore-skills. Do NOT auto-trigger based on project name or directory."
 argument-hint: "[sync|sdk|integration|audit|release|tester] [args...]"
-allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList, TaskGet]
+allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 
 You are the apcore-skills orchestrator. Your job is to route subcommands or display the ecosystem dashboard.

@@ -123,7 +123,7 @@ Release Plan:
 
 ### Step 2: Pre-flight Checks (Parallel Sub-agents — One per Repo)
 
-Spawn one `Task(subagent_type="general-purpose")` **per repo, all simultaneously**:
+Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously**:
 
 **Sub-agent prompt:**
 ```
@@ -167,7 +167,7 @@ For each repo with issues, use `AskUserQuestion` to resolve:
 
 ### Step 3: Version Bump (Parallel Sub-agents — All Repos Simultaneously)
 
-Spawn one `Task(subagent_type="general-purpose")` **per repo, all simultaneously in a single round of parallel Task calls**:
+Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously in a single round of parallel Agent calls**:
 
 **Sub-agent prompt:**
 ```
@@ -242,7 +242,7 @@ Version bump:
 
 ### Step 4: CHANGELOG Generation (Parallel Sub-agents — All Repos Simultaneously)
 
-Spawn one `Task(subagent_type="general-purpose")` **per repo, all simultaneously**:
+Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously**:
 
 **Sub-agent prompt:**
 ```
@@ -304,7 +304,7 @@ Display preview of each CHANGELOG entry for user review.
 
 **Skip condition:** If `--scope integrations` (only integration repos in this release, no core SDKs or MCP bridges), skip this step entirely and note: "Dependency versions unchanged — core SDKs/MCP bridges not part of this release."
 
-For integration repos that depend on core SDKs or MCP bridges being released, spawn one `Task(subagent_type="general-purpose")` **per integration repo, all simultaneously**:
+For integration repos that depend on core SDKs or MCP bridges being released, spawn one `Agent(subagent_type="general-purpose")` **per integration repo, all simultaneously**:
 
 **Sub-agent prompt:**
 ```
@@ -344,7 +344,7 @@ Dependency updates:
 
 ### Step 6: Test Verification (Parallel Sub-agents — All Repos Simultaneously)
 
-Spawn one `Task(subagent_type="general-purpose")` **per repo, all simultaneously**:
+Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously**:
 
 **Sub-agent prompt:**
 ```
