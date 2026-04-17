@@ -61,7 +61,7 @@ The audit covers 10 dimensions, each checking specific aspects:
 | D7 | Configuration | warning-info | APCORE_* settings consistency across integrations |
 | D8 | Project Structure | warning-info | File/directory layout per conventions |
 | D9 | **Bloat & Redundancy** | **critical-info** | **Dead exports, duplicate symbols, parallel implementations, LOC growth, unused config, scope creep** |
-| D10 | **Contract Parity (Intent)** | **critical-warning** | **Behavioral contract parity — inputs validation, errors raised, side-effect order, return shape, async/thread-safe/pure/idempotent/reentrant properties — catches "same signature, different logic" bugs** |
+| D10 | **Contract Parity (Intent)** | **critical-warning** | **Behavioral contract parity — inputs validation, errors raised, side-effect order, return shape, async/thread-safe/pure/idempotent/reentrant properties — catches "same signature, different logic" bugs. Plus: integration consumer-contract check (does this integration USE the core SDK per its current Contract?).** |
 
 ## Severity Levels
 
@@ -287,9 +287,9 @@ Use the `# Project Review:` header with a dynamic scope description (derived fro
 | D8 | warning | warning | Project structure deviation |
 | D9 | critical | critical | Parallel implementation / duplicate code / stub no-op method with spec-declared behavior |
 | D9 | warning | warning | Dead export / unused internal / wrapper / scope creep |
-| **D10** | **critical** | **blocker** | **Missing input validation or missing raised error type** — users hit silent bugs |
-| **D10** | **critical** | **critical** | **Side-effect order divergence, return shape divergence, thread_safe/async property divergence** |
-| **D10** | **warning** | **warning** | **Spec silent on Contract (cross-repo-only mode); extraction limit (null vs true/false); extra error raised beyond spec** |
+| **D10** | **critical** | **blocker** | **Missing input validation or missing raised error type** — users hit silent bugs; **integration missing required arg into core SDK**; **integration calling removed core SDK API** |
+| **D10** | **critical** | **critical** | **Side-effect order divergence, return shape divergence, thread_safe/async property divergence**; **integration calling non-thread-safe core SDK method from concurrent handlers** |
+| **D10** | **warning** | **warning** | **Spec silent on Contract (cross-repo-only mode); extraction limit (null vs true/false); extra error raised beyond spec**; **integration missing handler for a documented core SDK error**; **integration calling deprecated core SDK API** |
 | any | info | _(skip)_ | info-level findings are not actionable bugs |
 
 **Rules:**

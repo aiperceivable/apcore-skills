@@ -53,6 +53,14 @@ The API contract (below) contains a SOURCE_TREE, TESTS, and EXAMPLES section dis
 4. Helper file (conftest.py / helpers.ts) with shared fixtures: mock executor, sample context, sample module config
 5. Integration test directory with at least one placeholder test for end-to-end flow
 
+**Conformance runner stub** — scaffold `tests/conformance_runner.{ext}` following `shared/conformance-fixtures.md` "Runner Contract":
+1. CLI entry point accepting `--fixtures <path>`
+2. YAML fixture loader
+3. Dispatcher mapping canonical operations (new_registry, new_executor, call, reset, sleep_ms, tick_clock) to local SDK code. Scaffold the dispatcher with each op returning `UNSUPPORTED` so the runner is immediately invokable but reports "runner-completeness gap" until the ops are filled in.
+4. For each fixture case: execute setup → before → method call → compare against expect → emit `CONFORMANCE_CASE` block in the exact output format required by tester
+5. Exit codes: 0 all pass/skip, 1 any fail, 2 runner error, 3 fixtures not found
+6. Place in `tests/` (or language-equivalent). For Rust, register as a binary in `Cargo.toml`: `[[bin]] name = "conformance_runner" path = "tests/conformance_runner.rs"`.
+
 **Example files** — each example should contain:
 1. Complete, runnable code (not stubs) that demonstrates one usage pattern
 2. Inline comments explaining each step

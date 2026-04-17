@@ -54,7 +54,7 @@ Spec-driven test generation and cross-language behavioral verification.
 ## Command Format
 
 ```
-/apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|all] [--save report.md]
+/apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|contract|conformance|all] [--save report.md]
 ```
 
 | Flag | Default | Description |
@@ -62,17 +62,19 @@ Spec-driven test generation and cross-language behavioral verification.
 | `<repos...>` | **cwd** | Positional repo names to test. If omitted, defaults to CWD repo. |
 | `--spec` | all features | Specific feature spec to test (e.g., `executor`, `registry`, `acl`). Resolved against the target repo's spec source — see Step 1.2 for mapping. |
 | `--mode` | `full` | `generate` = create test files only. `run` = execute existing tests only. `full` = generate then run. |
-| `--category` | `all` | Test category filter: `unit` (single-module), `integration` (cross-module), `boundary` (edge cases + error paths), `protocol` (cross-language equivalence), `all`. |
+| `--category` | `all` | Test category filter: `unit`, `integration`, `boundary`, `protocol`, **`contract`** (Contract-block-derived tests per method: each input validation, each error, each property), **`conformance`** (shared fixtures from doc repo — cross-language golden tests), `all`. |
 | `--save` | off | Save test report to file. |
 
 ## Test Categories
 
-| Category | What It Covers | Example |
+| Category | What It Covers | Source |
 |----------|----------------|---------|
-| `unit` | Single class/function behavior against spec | `Executor.execute()` returns `ExecutionResult` with correct fields |
-| `integration` | Cross-module interaction | Registry → Executor → Module pipeline works end-to-end |
-| `boundary` | Edge cases, error paths, limits | Empty input, null context, max recursion depth, invalid module_id |
-| `protocol` | Cross-language behavioral equivalence | Same input → same output across Python, TypeScript, Rust |
+| `unit` | Single class/function behavior against spec | RFC 2119 clauses + REQ-xxx |
+| `integration` | Cross-module interaction | Spec interaction diagrams |
+| `boundary` | Edge cases, error paths, limits | Empty/null/max inputs; concurrency |
+| `protocol` | Cross-language behavioral equivalence via per-SDK unit tests with same clause IDs | clause-ID tagging |
+| **`contract`** | **Each `## Contract:` block → one test per input validation rule (assert correct error+code is raised), one per declared error (assert code), one per `### Properties` true value (assert async / thread-safe / idempotent / reentrant), one per `### Side Effects` (assert observable effects in order)** | **`## Contract:` blocks in feature specs (per `shared/contract-spec.md`)** |
+| **`conformance`** | **Shared input/output fixtures run identically across every SDK — the authoritative cross-language equivalence signal** | **`{doc_repo}/tests/conformance/**/*.yaml` (per `shared/conformance-fixtures.md`)** |
 
 ## Context Management
 
@@ -86,7 +88,7 @@ Step 2 spawns **one sub-agent per target repo** (each generates all applicable c
 ## Workflow
 
 ```
-Step 0 (ecosystem) → Step 1 (parse args + load specs) → Step 2 (generate tests) → Step 3 (run tests) → Step 4 (cross-language diff) → Step 5 (report)
+Step 0 (ecosystem) → Step 1 (parse args + load specs + load Contracts + load conformance fixtures) → Step 2 (generate clause tests) → Step 3 (run clause tests + run conformance fixtures) → Step 4 (cross-language diff + fixture matrix) → Step 5 (report)
 ```
 
 ## Detailed Steps
@@ -153,13 +155,9 @@ Spec sources resolved:
 
 #### 1.3 Extract Testable Clauses from Specs
 
-For each resolved spec file, extract testable clauses:
-- **Behavioral requirements** — "MUST", "SHALL", "SHOULD" statements
-- **Input/output contracts** — parameter types, return types, error conditions
-- **State transitions** — before/after conditions
-- **Error specifications** — which errors for which conditions, error codes
+For each resolved spec file, extract testable clauses. Two complementary sources:
 
-**Extraction differs by spec format:**
+**A) Narrative / requirement-ID clauses** (legacy — still useful for top-level behaviors):
 
 | Spec Format | Clause Extraction Strategy |
 |---|---|
@@ -169,31 +167,94 @@ For each resolved spec file, extract testable clauses:
 | `docs/features/*.md` | Scan for behavioral descriptions, acceptance criteria, and expected outcomes. Each distinct behavior = 1 clause. |
 | `docs/spec/*.md` | Same as PROTOCOL_SPEC — scan for RFC 2119 keywords. |
 
+**B) `## Contract:` block clauses (PRIMARY source when present — see `shared/contract-spec.md`):**
+
+For every `## Contract: ClassName.method_name` block in any feature spec, generate **deterministic** clauses:
+
+1. **One clause per `### Inputs` rule with `reject_with`** — deterministic id `{method_canonical}.input.{param}.{condition_slug}`:
+   - requirement: "{method} rejects {param} when {condition} with {error_type}(code={code})"
+   - category: `contract`
+   - inputs: a synthesized value that fails `condition`
+   - expected: error with that code
+
+2. **One clause per `### Errors` entry** — id `{method_canonical}.error.{error_code}`:
+   - requirement: "{method} raises {error_type} with code {code} when {trigger condition from Contract}"
+   - category: `contract`
+   - inputs: a synthesized value that triggers the error
+   - expected: error with code matching
+
+3. **One clause per `### Properties` true value** — id `{method_canonical}.property.{property_name}`:
+   - `async`: clause tests that the method is awaitable (Python `await`, TS await, Go goroutine, Rust `.await`)
+   - `thread_safe: true`: clause runs N parallel calls with distinct inputs, asserts no race (all complete, final state consistent)
+   - `idempotent: true`: clause calls the method twice with identical inputs, asserts second call's outcome matches the first (same return, same observable state, no new errors)
+   - `reentrant: true`: clause invokes the method from inside a callback the method itself calls, asserts no deadlock and correct result
+   - `pure: true`: clause calls the method twice on the same state, asserts no self-mutation visible via any other public query
+   - category: `contract`
+
+4. **One clause per `### Side Effects` ordered step** — id `{method_canonical}.side_effect.{N}.{effect_slug}`:
+   - requirement: "{method} executes {effect} at position {N} in source order"
+   - category: `contract`
+   - generation uses tracing/event-capture test scaffolding (the test observes the effect via public API — emitted event, post-state query, logged checkpoint, etc.)
+
+Each Contract-derived clause carries the field `contract_source: {file}#Contract.{ClassName}.{method}` for traceability back to the spec.
+
+**Clause de-duplication:** if a narrative clause and a Contract clause refer to the same behavior, keep the Contract-derived one (it is stricter and has deterministic inputs/outputs). Narrative clauses that are NOT covered by any Contract clause remain and are tagged `category: unit` or `boundary`.
+
 Store as `spec_clauses[]`:
 ```
 {
-  "id": "EXEC-001",
-  "source": "features/executor.md",
+  "id": "registry.register.input.id.invalid_pattern",
+  "source": "features/registry.md",
+  "contract_source": "features/registry.md#Contract.Registry.register",
   "spec_repo": "apcore",
-  "section": "Module Execution",
-  "requirement": "execute() MUST return ExecutionResult with status='success' when module returns valid output",
-  "category": "unit",
-  "inputs": { "module_id": "valid", "input": "valid dict", "context": "optional" },
-  "expected": { "status": "success", "output": "module return value" },
-  "error_path": false
+  "section": "Contract: Registry.register",
+  "requirement": "register rejects id when pattern match fails with InvalidIdError(code=INVALID_ID)",
+  "category": "contract",
+  "inputs": { "id": "1invalid", "module": {"kind": "mock"} },
+  "expected": { "error_type_snake": "invalid_id_error", "error_code": "INVALID_ID" },
+  "error_path": true
 }
 ```
 
-#### 1.4 Build Test Matrix
+If a feature spec defines a public method but has **no `## Contract:` block**, emit a WARNING clause `"{file} declares {Method} with no Contract block — only narrative clauses generated, no contract-category tests"`. This surfaces spec debt directly in the tester report (and aligns with audit D4's finding).
 
-Cross `spec_clauses[]` × `target_repos[]` × `categories[]`:
+#### 1.4 Load Shared Conformance Fixtures
+
+Scan each scope's doc repo for `tests/conformance/**/*.yaml`:
+- core scope: `apcore/tests/conformance/`
+- mcp scope: `apcore-mcp/tests/conformance/`
+- a2a scope: `apcore-a2a/tests/conformance/`
+- toolkit scope: `apcore-toolkit/tests/conformance/`
+
+For each fixture file found:
+1. Parse per `shared/conformance-fixtures.md`. Extract `method`, `contract_ref`, `setup`, `cases[]`, `properties_check`.
+2. Cross-check fixture coverage against the referenced Contract block:
+   - Every `### Inputs` validation with `reject_with` must have at least one matching case → else WARNING `"fixture {F} does not cover input rule {rule} from Contract"`.
+   - Every `### Errors` entry must have at least one case → else WARNING.
+   - Every `### Properties` true value must have a corresponding case (concurrency for `thread_safe`, repeat-call for `idempotent`, etc.) → else WARNING.
+3. Store as `conformance_fixtures[method] = fixture_obj`.
+
+If no fixtures found, emit INFO finding `"no conformance fixtures in {doc_repo}/tests/conformance/ — cross-language equivalence will be checked only via per-language clause tests (lower fidelity). Create fixtures per shared/conformance-fixtures.md."`
+
+Missing fixtures do not fail the run. They only reduce the confidence of the "protocol" and "conformance" categories.
+
+#### 1.5 Build Test Matrix
+
+Cross `spec_clauses[]` × `target_repos[]` × `categories[]`, plus conformance fixtures × target_repos[]:
 
 ```
 Test Matrix:
-  Clauses: {count} testable requirements
+  Narrative clauses: {count}
+  Contract-derived clauses: {count}
+    inputs:       {N}
+    errors:       {N}
+    properties:   {N}
+    side_effects: {N}
+  Conformance fixtures: {count} files, {total_cases} cases
   Repos: {repo-names}
   Categories: {selected categories}
-  Total test cases: {clauses × repos} (before dedup)
+  Total test cases to generate: {clauses × repos}
+  Total conformance cases to run: {cases × repos}
 ```
 
 ---
@@ -225,11 +286,33 @@ Test conventions (from ecosystem conventions):
 - Java: JUnit 5, `mvn test` / `gradle test`, 80%+ coverage target
 
 For each spec clause, generate a test that:
-1. Has a docstring/comment with the clause ID (e.g., "Tests EXEC-001")
+1. Has a docstring/comment with the clause ID (e.g., "Tests EXEC-001" or "Tests registry.register.input.id.invalid_pattern")
 2. Sets up minimal required state
 3. Exercises the exact behavior described in the clause
 4. Asserts the expected outcome using the spec's defined output
-5. For error-path clauses: asserts the correct error type and code
+5. For error-path clauses: asserts the correct error type AND the correct error code (not just the type — the code field must match exactly)
+6. **For contract-category clauses specifically:**
+   a. `input.{param}.{slug}` clauses: construct an input that fails the rule, assert the declared error type+code is raised. The test name MUST include the clause ID verbatim so cross-language diff can match.
+   b. `error.{CODE}` clauses: construct conditions that trigger the error, assert code matches.
+   c. `property.async` clauses: assert the method is awaitable in this language (`await method()` succeeds).
+   d. `property.thread_safe` clauses: launch N concurrent invocations (use language primitive — asyncio.gather / Promise.all / goroutines / tokio::spawn), assert no exception, assert final state consistent.
+   e. `property.idempotent` clauses: call method twice with identical inputs, assert identical outcome (return value, observable state).
+   f. `property.pure` clauses: call method twice on same input, assert no observable state change between calls.
+   g. `side_effect.{N}.{slug}` clauses: observe the effect via public API (emitted event, logged checkpoint, post-state query), assert order.
+
+**Test authenticity requirement (ANTI-STUB GUARD):**
+Every generated test MUST perform at least one non-trivial assertion. The following are forbidden test bodies:
+- Single line `assert True`, `expect(true).toBe(true)`, `t.Log("ok")`, `# TODO`
+- Empty body after setup
+- Assertion only on a variable's existence with no value check
+
+If a clause cannot produce a meaningful test (e.g., spec is too vague), emit a skip with explicit reason:
+- Python: `pytest.skip("Clause {id} lacks concrete acceptance criteria — deferred")`
+- TypeScript: `it.skip(...)` with reason comment
+- Go: `t.Skip(...)` with reason
+- Rust: `#[ignore = "..."]`
+
+Skipped tests are surfaced in the report as "needs spec clarification" — they are NOT counted as passing.
 
 Test file organization:
 - One test file per feature spec (e.g., test_executor.py, executor.test.ts)
@@ -343,9 +426,65 @@ FAILURES:
 
 ---
 
+### Step 3.5: Run Shared Conformance Fixtures (Sub-agents)
+
+**Skip if** `--category` excludes `conformance` AND `all`, OR no fixtures loaded in Step 1.4.
+
+Spawn **one sub-agent per target repo**, all in parallel.
+
+#### Sub-agent: Run Conformance Runner for {repo}
+
+**Prompt:**
+```
+Run the conformance-fixture runner for {repo_path}.
+
+Runner location (detect which exists):
+  Python:     {repo_path}/tests/conformance_runner.py
+  TypeScript: {repo_path}/tests/conformance_runner.ts
+  Go:         {repo_path}/tests/conformance_runner.go
+  Rust:       {repo_path}/tests/conformance_runner.rs
+
+Fixture location: {doc_repo_path}/tests/conformance/
+
+Invocation:
+  Python:     cd {repo_path} && python tests/conformance_runner.py --fixtures {doc_repo_path}/tests/conformance/ 2>&1
+  TypeScript: cd {repo_path} && npx tsx tests/conformance_runner.ts --fixtures {doc_repo_path}/tests/conformance/ 2>&1
+  Go:         cd {repo_path} && go run ./tests/conformance_runner.go --fixtures {doc_repo_path}/tests/conformance/ 2>&1
+  Rust:       cd {repo_path} && cargo run --bin conformance_runner -- --fixtures {doc_repo_path}/tests/conformance/ 2>&1
+
+Parse CONFORMANCE_CASE blocks from output per shared/conformance-fixtures.md format.
+
+Error handling:
+- If runner does not exist: report STATUS: NO_RUNNER with detail "Repo {R} has no conformance_runner.{ext}. Bootstrap one by copying the pattern from the reference SDK and implementing the setup/call/reset/... primitives."
+- If runner crashes: report STATUS: RUNNER_ERROR with full stderr
+- If runner reports UNSUPPORTED for an op: pass the case's UNSUPPORTED through — it's a runner-completeness gap, not a test failure
+- Capture ALL cases even on first failure (do not stop at first fail)
+
+Return:
+REPO: {repo-name}
+STATUS: {completed|no_runner|runner_error}
+TOTAL_CASES: {N}
+PASS: {N}
+FAIL: {N}
+SKIPPED: {N}
+UNSUPPORTED: {N}
+ERROR: {N}
+CASES:
+- file: {relative path}
+  method: {Class.method}
+  case_id: {id}
+  status: PASS|FAIL|SKIPPED|UNSUPPORTED|ERROR
+  details: {as emitted by runner}
+  duration_ms: {int}
+```
+
+Wait for all runners to complete. Store as `conformance_results[repo]`.
+
+---
+
 ### Step 4: Cross-Language Behavioral Diff
 
-After collecting results from all repos, compare test outcomes across languages for the same clause IDs.
+After collecting results from all repos, compare test outcomes across languages for the same clause IDs **and** for the same conformance case IDs.
 
 For each clause ID tested in multiple repos:
 1. Extract pass/fail status from each repo
@@ -353,23 +492,53 @@ For each clause ID tested in multiple repos:
 3. If all fail with same reason → **spec gap** (spec may need updating, or feature not implemented anywhere)
 4. If mixed (pass in some, fail in others) → **BEHAVIORAL INCONSISTENCY** (critical finding)
 
-Build the consistency matrix:
+Build two consistency matrices.
+
+**Matrix A — Per-language Unit / Contract Clause Diff (clause-ID based):**
 
 ```
-Cross-Language Behavioral Consistency:
+Cross-Language Behavioral Consistency (Clause):
 
-Clause ID   | Python | TypeScript | Rust | Status
-EXEC-001    | PASS   | PASS       | PASS | consistent
-EXEC-002    | PASS   | FAIL       | —    | INCONSISTENT
-REG-005     | FAIL   | FAIL       | —    | spec-gap
-ACL-003     | PASS   | PASS       | FAIL | INCONSISTENT
+Clause ID                                       | Python | TypeScript | Rust | Status
+EXEC-001                                        | PASS   | PASS       | PASS | consistent
+registry.register.input.id.invalid_pattern      | PASS   | PASS       | FAIL | INCONSISTENT
+registry.register.error.DUPLICATE               | PASS   | FAIL       | PASS | INCONSISTENT
+registry.register.property.thread_safe          | PASS   | FAIL       | PASS | INCONSISTENT
 ...
 
 Consistent: {N}/{total} ({pct}%)
 Inconsistent: {N} (CRITICAL — requires investigation)
-Spec gaps: {N} (feature not implemented in any repo)
-Not tested: {N} (clause not covered by generated tests)
+Spec gaps: {N}
+Not tested: {N}
 ```
+
+**Matrix B — Conformance Fixture Diff (fixture case-id based — HIGHEST FIDELITY):**
+
+This matrix is the authoritative cross-language equivalence signal because every SDK runs the **same** inputs and is compared against the **same** expected outputs.
+
+```
+Cross-Language Conformance (Shared Fixtures):
+
+File/Case                                              | Python | TypeScript | Rust
+registry/register.yaml: valid_registration             | PASS   | PASS       | PASS
+registry/register.yaml: duplicate_rejected             | PASS   | FAIL       | PASS
+registry/register.yaml: invalid_id_rejected            | PASS   | PASS       | FAIL
+registry/register.yaml: thread_safe_concurrent         | PASS   | FAIL       | PASS
+executor/execute.yaml: valid_execution                 | PASS   | PASS       | PASS
+...
+
+Conformance pass rate:
+  apcore-python:       {N}/{total} ({pct}%)
+  apcore-typescript:   {N}/{total} ({pct}%)
+  apcore-rust:         {N}/{total} ({pct}%)
+
+Divergent cases (act on these FIRST — golden-test divergence is unambiguous):
+  {N} cases with mixed PASS/FAIL across languages
+```
+
+Any row in Matrix B with mixed PASS/FAIL is a **CRITICAL** behavioral divergence finding — this is the "same input produces different output" bug class that unit tests cannot catch.
+
+When Matrix A and Matrix B disagree (e.g., Matrix A says consistent but Matrix B says divergent), trust Matrix B. Likely cause: per-language clause tests used different inputs, masking the divergence.
 
 ---
 
@@ -422,14 +591,92 @@ Spec sources: {spec_repo_names and doc counts}
   Clauses without tests: {list}
   Repos with <80% coverage: {list}
 
+═══ SHARED CONFORMANCE FIXTURES ═══
+
+  Fixture files loaded: {N} (from {doc_repo}/tests/conformance/)
+  Total cases: {N}
+
+  Per-repo results:
+    apcore-python:       {pass}/{total} PASS, {N} UNSUPPORTED, {N} SKIPPED
+    apcore-typescript:   {pass}/{total} PASS, {N} UNSUPPORTED, {N} SKIPPED
+    apcore-rust:         {pass}/{total} PASS, {N} UNSUPPORTED, {N} SKIPPED
+
+  DIVERGENCES (CRITICAL — cross-language golden test mismatch):
+    [registry/register.yaml:duplicate_rejected]
+      apcore-python: PASS (raised DuplicateError, code=DUPLICATE)
+      apcore-typescript: FAIL (silently overwrote, returned null)
+      apcore-rust: PASS
+      Action: Fix TypeScript register() to raise DuplicateError when id exists and overwrite=false
+
+  COVERAGE GAPS (fixtures vs Contract):
+    [registry/register.yaml] does not cover Contract rule: inputs.module.type_check / reject_with=TypeError
+      Add a case with non-Module value for `module` and expect error code TYPE_ERROR
+
+═══ TEST AUTHENTICITY ═══
+
+  Total generated tests: {N}
+  Non-trivial assertions: {N}
+  Stub detected (rejected): {N}     — blocked from commit, rewritten via fallback
+  Skipped with explicit reason: {N} — listed below for spec clarification
+
+  Skips needing spec clarification:
+    - {clause-id}: {skip reason}
+
 ═══ FAILING TESTS AS BUG REPORTS ═══
 
   {count} failing tests written to repos as executable bug reports.
+  {count} divergent conformance cases flagged.
   To fix: run /code-forge:fix in the affected repo.
   To re-verify after fix: run /apcore-skills:tester --mode run
 ```
 
 If `--save` flag: write full report to specified path.
+
+#### 5.1 Review-Compatible Issue Report
+
+**ALWAYS append a review-compatible report so that `/code-forge:fix --review` can directly consume tester output.**
+
+Convert every divergence (both Matrix A inconsistencies and Matrix B divergences) plus every authenticity-blocked stub into `code-forge:review` format. Same schema as sync Step 9.1 and audit Step 3.1.
+
+```markdown
+# Project Review: {scope_description} (tester)
+
+## Behavior
+
+- severity: blocker
+  file: {outlier_repo}/{path-to-impl-file}
+  line: {line}
+  title: [T-B-001] Conformance divergence — {fixture_file}:{case_id}
+  description: Shared fixture case `{case_id}` in `{fixture_file}` produces different outcomes. Python: PASS. TypeScript: FAIL ({unmet_expectation}). Rust: PASS. Same input → different output = intent divergence.
+  suggestion: {concrete fix — cite the Contract's ### Errors entry or the non-outlier SDK's implementation as reference}
+
+- severity: critical
+  file: {repo}/{path-to-impl}
+  line: 1
+  title: [T-P-002] Property divergence — {method}.property.{name}
+  description: Contract declares property.{name}=true; generated property test fails in {repo}. {observed behavior description}.
+  suggestion: {concrete fix}
+
+- severity: warning
+  file: {doc_repo}/tests/conformance/{fixture_file}
+  line: 1
+  title: [T-F-003] Fixture coverage gap — Contract rule not exercised
+  description: Fixture does not cover Contract rule {rule}. Adding a case would make cross-language divergence in this rule detectable.
+  suggestion: Append case skeleton (see shared/conformance-fixtures.md).
+```
+
+Severity mapping:
+
+| Signal | Review Severity |
+|---|---|
+| Matrix B (fixture) divergence | blocker |
+| Matrix A inconsistency on `contract`-category clause | critical |
+| Matrix A inconsistency on `unit` / `boundary` clause | critical |
+| Authenticity-blocked stub (test body was trivial) | warning |
+| Fixture coverage gap | warning |
+| Spec missing `## Contract:` block (from Step 1.3 warning) | warning |
+
+If no divergences, still emit the header with `_(No actionable issues found — all tests pass and cross-language conformance is green.)_`.
 
 ---
 

@@ -32,6 +32,11 @@ Run the ecosystem discovery from the shared ecosystem module:
 2. Scan for all apcore repositories
 3. Extract versions from build config files
 4. Check git status for each repo
+5. **Surface consistency health** — scan `{ecosystem_root}` for the most recent reports and summarize their key scores:
+   - `sync-report-*.md` (from `/apcore-skills:sync --save`) — pick the newest by mtime. Extract Phase A contract section, Phase B contradictions, overall critical count.
+   - `release-audit-*.md` (from release gate) or ad-hoc `audit-report-*.md` — pick the newest. Extract D9 Leanness score and D10 Contract Parity score from the Health Score section.
+   - `release-tester-*.md` or `tester-*.md` — pick the newest. Extract conformance pass rate and divergent case count.
+   - If no reports exist, show `"— no recent reports; run /apcore-skills:audit --save to populate"`.
 
 Display:
 
@@ -56,6 +61,21 @@ Repos discovered: {count}
 Version Sync Check:
   core group:  apcore-python=0.7.0, apcore-typescript=0.7.1, apcore-rust=0.1.0  ⚠ MISMATCH
   mcp group:   apcore-mcp-python=0.8.1, apcore-mcp-typescript=0.8.1  ✓ OK
+
+Consistency Health (from latest reports):
+  Last audit:     {date} — audit-report-{date}.md
+    Contract Parity (D10): {score}/100  {▓▓▓▓▓▓░░░░}
+    Leanness (D9):         {score}/100  {▓▓▓▓▓▓▓░░░}
+    CRITICAL findings:     {N}  (top: [{top-finding-id}] {one-line})
+  Last sync:      {date} — sync-report-{date}.md
+    Phase A FAIL:          {N}
+    Phase B FAIL:          {N}
+    Contract-tier divergences: {N}
+  Last tester:    {date} — tester-{date}.md
+    Conformance cases:    {pass}/{total} PASS
+    Cross-language divergences: {N}
+
+  (If no reports found: "Run /apcore-skills:audit --save to populate this section.")
 
 Commands:
 

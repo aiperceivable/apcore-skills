@@ -326,7 +326,7 @@ Write a minimal demo app that:
 
 ### Step 6: Generate Code-Forge Config and Feature Specs
 
-Write `.code-forge.json` and generate feature specs for code-forge planning:
+Write `.code-forge.json` and generate feature specs for code-forge planning.
 
 Feature specs to generate (one per core capability):
 1. `scanner.md` — Endpoint scanning for this framework
@@ -336,7 +336,21 @@ Feature specs to generate (one per core capability):
 5. `cli.md` — CLI commands (scan, serve, export)
 6. `observability.md` — Framework-specific tracing (optional)
 
-Write to `{target-path}/docs/features/`.
+Each feature spec MUST include:
+- **Purpose** — what the feature does
+- **Public API surface** — classes / functions / CLI commands introduced by this integration
+- **Acceptance criteria**
+- **One `## Contract: ClassName.method` block per public method** — per `shared/contract-spec.md`. The integration's public methods are scanner discovery entry points, config loader, context factory, CLI command entry points. Fill Contract fields from the reference integration (`{ref_path}`) where possible; mark the rest as `TODO`. **Never emit an empty Contract block** — if inference impossible, skip that method and surface as `"Contract skeleton deferred for {method} — fill by hand"` in the summary.
+- **Core-SDK consumer contract** — for every call the integration makes into the core SDK (e.g., `Registry.register`, `Executor.execute`, `Context(...)`), cite the upstream `## Contract:` in `apcore/docs/features/*.md` and record which inputs / errors / properties the integration relies on. audit D10 uses this to verify the integration keeps using the core SDK correctly as the SDK evolves.
+
+#### 6.1 Configuration Settings — Canonical Source
+
+`config.md` feature spec and `src/{package}/config.{ext}` MUST source `APCORE_*` setting names / types / defaults from `shared/conventions.md` → "Required settings" list. Do NOT invent new settings inside an integration. If the framework genuinely requires a new setting:
+1. Name it with the prefix `APCORE_{FRAMEWORK}_*` (e.g., `APCORE_FASTAPI_ROUTE_PREFIX`), not bare `APCORE_*`
+2. Document the rationale in `docs/features/config.md` under a `### Framework-specific settings` section
+3. File a PR against `shared/conventions.md` only if the setting is universally applicable
+
+audit D7 flags any bare `APCORE_*` setting in an integration that is not in the canonical list.
 
 Initialize git and create the skeleton commit automatically:
 

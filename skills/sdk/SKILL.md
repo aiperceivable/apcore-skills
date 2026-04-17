@@ -25,7 +25,7 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 ## Iron Law
 
-**EVERY NEW PROJECT MUST IMPLEMENT THE FULL API CONTRACT. No partial implementations — if you ship it, it must cover all exported symbols from the reference implementation.**
+**EVERY NEW PROJECT MUST IMPLEMENT THE FULL API CONTRACT AND PASS THE POST-IMPL CONSISTENCY GATE (Step 9.5). No partial implementations — if you ship it, it must cover all exported symbols from the reference implementation, agree with the reference on Contract (inputs / errors / side effects / properties), and pass shared conformance fixtures. "code-forge:impl finished" is NOT the completion bar — "Step 9.5 gate passed" is.**
 
 ## Anti-Rationalization Table
 
@@ -69,7 +69,7 @@ Steps 2 and 4 use sub-agents. Step 2 analyzes the reference implementation. Step
 ## Workflow
 
 ```
-Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs) → 6 (code-forge config) → 7 (git init) → 8 (port) → 9 (impl) → 10 (summary)
+Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs w/ Contract blocks) → 6 (code-forge config) → 7 (git init) → 8 (port) → 9 (impl) → 9.5 (consistency gate — sync + tester) → 10 (summary)
 ```
 
 ## Bundled References
@@ -188,10 +188,20 @@ If they exist:
 
 If they don't exist:
 - Extract module list from the API contract
-- Generate lightweight feature specs at `{target-path}/docs/features/`:
+- Generate feature specs at `{target-path}/docs/features/`:
   - One per module (executor, registry, schema, etc.)
-  - Each spec contains: module purpose, public API surface, acceptance criteria
-- Display: `Feature specs generated: {N} specs in docs/features/`
+  - Each spec contains:
+    - Module purpose
+    - Public API surface (classes, functions, signatures)
+    - Acceptance criteria
+    - **One `## Contract: ClassName.method_name` block per public method** — per `shared/contract-spec.md`. Fields generated from what can be inferred from the reference implementation:
+      - `### Inputs` — from reference method parameter list + any visible validation guards in reference source (grep for `if not X: raise`, early-return patterns); leave `validation` / `reject_with` as `TODO` when the reference has no guard
+      - `### Errors` — from `raise X`/`throw new X`/`return Err(X)` sites in the reference method; resolve codes where visible
+      - `### Returns` — from reference return type
+      - `### Properties` — fill `async` from reference signature; others default to `TODO`
+      - `### Side Effects` / `### Preconditions` / `### Postconditions` — emit as `TODO — fill in during implementation` (do NOT invent)
+- **Never emit an empty Contract block.** If literally no inference is possible, skip the method and surface it in the summary as "Contract skeleton not generated for {method} — insufficient reference signal; fill by hand".
+- Display: `Feature specs generated: {N} specs, {M} Contract blocks (filled: {filled}, TODO: {todo})`
 
 ---
 
@@ -278,6 +288,55 @@ After each feature completes, commit the implementation:
 git add .
 git commit -m "feat({module}): implement {feature-name} for {target-repo-name}"
 ```
+
+---
+
+### Step 9.5: Post-Impl Consistency Gate (MANDATORY)
+
+Once `code-forge:impl` has finished all planned features, run the full consistency suite against the reference implementation. This is non-negotiable — an SDK that hasn't been verified for Contract parity is not an SDK, it's a draft.
+
+#### 9.5.1 Sync vs Reference
+
+```
+/apcore-skills:sync {target-repo-name},{ref-repo-name} --phase all --internal-check=contract --save {ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md
+```
+
+This compares the new SDK against the reference for:
+- Public API signatures (Phase A)
+- Behavioral contracts (Step 4B — inputs validation, errors, side effects, return shape, properties)
+- Documentation (Phase B)
+
+Parse the saved report for:
+- CRITICAL findings count
+- Contract-tier divergence count
+
+#### 9.5.2 Tester Run
+
+Only run if the reference has a conformance suite:
+
+```
+/apcore-skills:tester {target-repo-name} --mode full --category all --save {ecosystem_root}/sdk-bootstrap-tester-{target-repo-name}.md
+```
+
+If the reference has `tests/conformance/` fixtures, the new SDK's conformance runner must have been scaffolded in Step 4. Verify it runs and emits CONFORMANCE_CASE blocks. If the runner is missing or emits UNSUPPORTED for many ops, surface as "Conformance runner incomplete — implement missing primitives in tests/conformance_runner.{ext}".
+
+Parse the saved report for:
+- Cross-language divergences (Matrix B)
+- Authenticity-blocked stubs
+
+#### 9.5.3 Gate Decision
+
+| Sync CRITICAL | Contract divergences | Fixture divergences | Action |
+|---|---|---|---|
+| 0 | 0 | 0 | **PASS** — proceed to Step 10 |
+| any > 0 | any | any | **FAIL** — present findings |
+
+On FAIL, display the top findings and use `AskUserQuestion`:
+- "Run /code-forge:fix --review" — consumes the sync + tester review-compatible outputs and auto-patches
+- "Manual fix — I'll do it" — stops here; user re-runs `/apcore-skills:sdk` after fixing (step 9.5 will re-run)
+- "Accept and continue (NOT RECOMMENDED)" — requires rationale logged to `{ecosystem_root}/sdk-gate-overrides.md`
+
+Only after the gate passes does Step 10 declare the SDK complete.
 
 ---
 

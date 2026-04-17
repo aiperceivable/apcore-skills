@@ -232,6 +232,26 @@ apcore-toolkit-{lang}/
 └── LICENSE
 ```
 
+#### Framework Integration Configuration (`APCORE_*`)
+
+All framework integrations MUST implement these settings with identical names, types, and default values. audit D7 enforces this. New settings that are truly framework-specific use the prefix `APCORE_{FRAMEWORK}_*` (e.g., `APCORE_FASTAPI_ROUTE_PREFIX`), never bare `APCORE_*`.
+
+| Setting | Type | Default | Purpose |
+|---|---|---|---|
+| `APCORE_ENABLED` | bool | `True` | Master switch |
+| `APCORE_DEBUG` | bool | `False` | Verbose logging / introspection |
+| `APCORE_SCANNERS` | list[str] | `["auto"]` | Enabled scanner identifiers |
+| `APCORE_INCLUDE_PATHS` | list[str] | `[]` | Route patterns to include (empty = all) |
+| `APCORE_EXCLUDE_PATHS` | list[str] | `[]` | Route patterns to exclude |
+| `APCORE_MODULE_PREFIX` | str | `""` | Prefix prepended to generated module ids |
+| `APCORE_AUTH_ENABLED` | bool | `False` | Require auth for MCP/A2A endpoints |
+| `APCORE_AUTH_STRATEGY` | str | `"bearer"` | `bearer` / `session` / `custom` |
+| `APCORE_TRANSPORT` | str | `"stdio"` | MCP transport: `stdio` / `http` / `sse` |
+| `APCORE_HOST` | str | `"0.0.0.0"` | Bind address when transport is not stdio |
+| `APCORE_PORT` | int | `8808` | Bind port when transport is not stdio |
+
+Defaults are authoritative: changing a default in one integration (e.g., `APCORE_PORT = 9000`) without changing it here is an audit D7 critical finding.
+
 #### Git Conventions
 
 - **Commit format:** Conventional Commits — `feat|fix|docs|style|refactor|perf|test|chore|ci(scope): message`

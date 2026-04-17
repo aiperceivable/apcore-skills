@@ -242,11 +242,20 @@ For each integration:
 2. Extract all APCORE_* settings with types and defaults
 3. Compare settings across integrations — same settings should have same types and defaults
 
-Required settings (must be present in all):
+Required settings (must be present in all — canonical list in shared/conventions.md → "Framework Integration Configuration"):
 - APCORE_ENABLED, APCORE_DEBUG, APCORE_SCANNERS
 - APCORE_INCLUDE_PATHS, APCORE_EXCLUDE_PATHS
-- APCORE_MODULE_PREFIX, APCORE_AUTH_ENABLED
+- APCORE_MODULE_PREFIX, APCORE_AUTH_ENABLED, APCORE_AUTH_STRATEGY
 - APCORE_TRANSPORT, APCORE_HOST, APCORE_PORT
+
+Canonical defaults (mismatch with these is CRITICAL, not warning):
+- ENABLED=True, DEBUG=False, SCANNERS=["auto"], INCLUDE_PATHS=[], EXCLUDE_PATHS=[]
+- MODULE_PREFIX="", AUTH_ENABLED=False, AUTH_STRATEGY="bearer"
+- TRANSPORT="stdio", HOST="0.0.0.0", PORT=8808
+
+New settings policy (additional check):
+- Any bare APCORE_* setting NOT in the canonical list above → CRITICAL "unauthorized canonical setting {NAME} — use APCORE_{FRAMEWORK}_* prefix for framework-specific settings, or propose an addition to shared/conventions.md"
+- Any APCORE_{FRAMEWORK}_* setting → OK if documented in that integration's docs/features/config.md under a Framework-specific settings heading; else WARNING
 
 Error handling: If config file not found in a repo, report as: severity=warning, detail="Config file not found for {repo}"
 
@@ -555,4 +564,49 @@ CONTRACT_MATRIX:
       ...
 
 Target output size: keep CONTRACT_MATRIX to at most 30 symbols (the ones with at least one divergence); summarize fully-passing symbols as a count "N symbols fully match, not listed".
+
+=== Step 4 (integration-specific): Consumer Contract Check ===
+
+**Runs only when an integration repo is in {repo_paths} AND a core SDK repo is also in {repo_paths} (or reachable via --scope all).** Skip otherwise.
+
+For each integration repo, verify it USES the core SDK according to the core SDK's current Contract:
+
+1. Find every call site into the core SDK:
+   - Python integrations: grep for `from apcore import` / `import apcore.`; then find every method call on imported symbols (`Registry(...)`, `Executor(...).execute(...)`, `Context(...)`, etc.)
+   - TypeScript integrations: grep for `from "apcore-js"` / `from "apcore"`; find every method call
+   - Go integrations: grep for `"github.com/aipartnerup/apcore-go"` imports; find every call
+   - Rust integrations: grep for `use apcore::`; find every call
+
+2. For each call site, extract:
+   - What public method is invoked (canonical method name)
+   - What arguments are passed (at least type info)
+   - What errors the integration catches / handles (try/except, try/catch, match on Result)
+
+3. Cross-check against the core SDK's spec_contracts[method]:
+   a. **Input completeness**: required parameters from spec are all provided → CRITICAL if any required param missing (call won't type-check or will fail at runtime)
+   b. **Input validation awareness**: for every declared `### Inputs.{param}.reject_with=E`, check whether the integration validates / sanitizes before the call OR has a catch for E. If neither → WARNING `"{integration} calls {method} but does not handle declared {E} — users will see unhandled exception"`
+   c. **Error coverage**: for every error in the core SDK's `### Errors`, check whether the integration has a handler (try/except, catch, match). Missing handler for a documented error → WARNING
+   d. **Property assumption**: if integration calls a method marked `thread_safe: false` from concurrent request handlers (common in async frameworks) → CRITICAL `"{integration} calls non-thread-safe {method} from concurrent handlers — add external locking or rework"`
+   e. **Deprecated usage**: if integration calls a method that was in core-sdk CHANGELOG's `### Deprecated` or `### Removed` at or before the integration's pinned core-sdk version → WARNING / CRITICAL (removed = critical; deprecated = warning)
+
+4. Emit findings with `category: consumer_contract`, `repo: {integration-repo}`, and `location` pointing to the integration file's call site.
+
+Additional fields in CONTRACT_MATRIX for integration consumer rows:
+```
+- symbol: {method}
+  consumer_repo: {integration-name}
+  core_sdk_contract_ref: apcore/docs/features/{file}.md#Contract.{Class}.{method}
+  call_sites: [{file:line}, ...]
+  rows:
+    - row: input.completeness
+      status: PASS|FAIL
+      missing: [{param1}, ...]
+    - row: error.handling.{ErrorType}
+      status: PASS|FAIL|WARN
+      handled_at: {file:line or "(none)"}
+    - row: property.{thread_safe|idempotent|...}
+      integration_assumes: true|false|null
+      core_sdk_declares:   true|false
+      status: PASS|FAIL
+```
 ```

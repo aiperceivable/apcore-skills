@@ -39,6 +39,8 @@ Execute a coordinated release across multiple apcore ecosystem repositories.
 | "CHANGELOG can be updated later" | CHANGELOG is part of the release artifact. Generate it now from git log. |
 | "Tests passed last time, skip them" | Test every repo after version bump. Dependency changes can break things. |
 | "I'll push one repo at a time" | Coordinate all repos first, push together after approval. |
+| "Audit / sync can run after the release" | NO. Shipping a version with a known critical L2 intent divergence means every user hits the bug. Step 2.5 runs audit + sync BEFORE version bump. Any CRITICAL blocks release unless user explicitly overrides (with logged rationale). |
+| "Conventional commit prefixes tell me what's breaking" | NO. A Contract-level change (e.g., silent overwrite → raise DuplicateError) is breaking but often lands under `fix:` or `refactor:`. Step 2.5 surfaces the actual Contract deltas from the sync report; Step 4 uses that delta to classify CHANGELOG entries correctly, not just commit prefixes. |
 
 ## When to Use
 
@@ -62,7 +64,7 @@ Execute a coordinated release across multiple apcore ecosystem repositories.
 ## Workflow
 
 ```
-Step 0 (ecosystem) → 1 (parse & validate) → 2 (pre-flight) → 3 (version bump) → 4 (changelog) → 5 (deps update) → 6 (test) → 7 (commit) → 8 (summary) → [9 (push)]
+Step 0 (ecosystem) → 1 (parse & validate) → 2 (pre-flight) → 2.5 (consistency gate) → 3 (version bump) → 4 (changelog) → 5 (deps update) → 6 (test) → 7 (commit) → 8 (summary) → [9 (push)]
 ```
 
 ## Context Management
@@ -165,6 +167,71 @@ For each repo with issues, use `AskUserQuestion` to resolve:
 
 ---
 
+### Step 2.5: Consistency Gate (MANDATORY — runs before any mutation)
+
+Before bumping any version, run the ecosystem consistency skills and block the release if any CRITICAL finding exists. This prevents shipping known intent divergences, API mismatches, or contract parity gaps.
+
+#### 2.5.1 Run Audit
+
+Invoke `/apcore-skills:audit --scope {scope} --save {ecosystem_root}/release-audit-{version}.md` (scope is the release scope from Step 1.2; if scope is `integrations` or CWD-only-integration, use that scope — integrations still audit D2–D9).
+
+Wait for audit to complete. Parse the saved report for:
+- **CRITICAL count** across dimensions D1–D10
+- **Contract Parity score** (D10) — from the Health Score section
+- **Leanness score** (D9) — from the Health Score section
+
+#### 2.5.2 Run Sync (only when scope has ≥2 peer repos)
+
+Skip if the scope contains only 1 impl repo per language group (single-SDK case).
+
+Invoke `/apcore-skills:sync --scope {scope-mapping} --internal-check=contract --save {ecosystem_root}/release-sync-{version}.md`.
+
+Scope mapping:
+- `core` → `--scope core`
+- `mcp` → `--scope mcp`
+- `all` → `--scope all`
+- `integrations` → skip sync (integrations have no cross-language peers by design)
+
+Wait for sync to complete. Parse the saved report for:
+- CRITICAL findings in Phase A (spec ↔ impl) and Phase B (docs)
+- Contract tier (Step 4B) divergences
+
+#### 2.5.3 Aggregate Gate Decision
+
+```
+Release Consistency Gate — v{version}
+
+Audit report: release-audit-{version}.md
+  D10 Contract Parity score: {score}/100
+  D9 Leanness score: {score}/100
+  CRITICAL findings: {N}
+
+Sync report: release-sync-{version}.md
+  Phase A: {N} critical
+  Phase B: {N} critical
+  Contract tier divergences: {N}
+```
+
+**Decision rule:**
+
+| Audit CRITICAL | Sync CRITICAL | D10 score | Action |
+|---|---|---|---|
+| 0 | 0 | ≥ 90 | **PASS** — continue to Step 3 |
+| > 0 or > 0 | any | any | **BLOCK** — present findings, `AskUserQuestion` |
+| 0 | 0 | 70–89 | **WARN** — show summary, `AskUserQuestion` whether to continue |
+| 0 | 0 | < 70 | **BLOCK** — contract parity too low for release |
+
+**When BLOCKED**, display the top 5 findings by severity (cite the finding IDs from the saved reports) and use `AskUserQuestion`:
+- "Run /code-forge:fix --review on the audit + sync reports" — delegates fix-up; after fixes complete, user re-invokes `/apcore-skills:release`
+- "Abort release" — stop; no mutations have been made yet
+- "Override and continue (requires rationale)" — `AskUserQuestion` follow-up: "Provide rationale for shipping with known critical findings" (free-form text); append the rationale to `{ecosystem_root}/release-overrides-{version}.md` with timestamp, user identity from `git config user.email`, and the list of unfixed finding IDs. Only then continue to Step 3.
+
+**When WARN (medium D10 score)**, display summary and ask `AskUserQuestion`: "Continue release?" → continue | "Run fix first" | "Abort".
+
+**Findings captured by the gate are passed forward** to Step 4 (CHANGELOG) — any critical finding marked "contract tier divergence" indicates a Contract-level semantic change that SHOULD appear in CHANGELOG's `### Breaking` section regardless of commit prefix. Step 4 reads the sync report to enrich classification.
+
+---
+
 ### Step 3: Version Bump (Parallel Sub-agents — All Repos Simultaneously)
 
 Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously in a single round of parallel Agent calls**:
@@ -258,6 +325,10 @@ Generate a CHANGELOG entry for {repo_path} version {new_version}.
    - **Breaking** — breaking changes (feat!:, fix!:, or BREAKING CHANGE in body)
    - **Documentation** — doc changes (docs:)
    - **Other** — everything else (chore:, ci:, test:)
+
+   **Augment classification from Step 2.5 gate findings.** Read `{ecosystem_root}/release-sync-{version}.md`. For every finding in sync Phase A (signature change) or sync Step 4B (Contract tier — inputs/errors/side-effects/return/properties divergence from prior version), cross-reference the commit that introduced it (via `git log -S`). Any such commit MUST land in the `### Breaking` section even if its prefix was `fix:` or `refactor:`. Emit a note under the entry: `Breaking (contract): {finding summary} — was classified as {prefix} in commit history`.
+
+   Also include any A-001 / A-C-{seq} / B-001 finding IDs referenced in the commits. The finding ID + a one-line description goes into the CHANGELOG entry so downstream consumers can trace.
 4. Write the new entry at the top of CHANGELOG.md, after any existing header:
 
 ## [{new_version}] - {YYYY-MM-DD}
@@ -377,20 +448,32 @@ Error handling:
 - Do NOT fail the entire release if test runner is unavailable — report and let user decide
 ```
 
+**After per-repo unit tests pass, run shared conformance fixtures.** Skip when scope is `integrations` only (no shared fixtures for integrations).
+
+Invoke `/apcore-skills:tester --category conformance --mode run --save {ecosystem_root}/release-tester-{version}.md` scoped to the same repos. This runs each SDK's `conformance_runner` against shared fixtures from the doc repo, producing a cross-language divergence matrix.
+
+If any conformance case diverges (mixed PASS/FAIL), treat it as a release-blocking failure — the "same input, different output" bug class cannot ship.
+
 Display results:
 ```
 Test verification:
-  apcore-python:       ✓ 393/393 passing
-  apcore-typescript:    ✓ 287/287 passing
-  apcore-mcp-python:   ✓ 156/156 passing
-  django-apcore:       ✓ 644/644 passing
+  Per-repo unit tests:
+    apcore-python:       ✓ 393/393 passing
+    apcore-typescript:    ✓ 287/287 passing
+    apcore-mcp-python:   ✓ 156/156 passing
+    django-apcore:       ✓ 644/644 passing
+  Shared conformance fixtures:
+    apcore-python:       ✓ 82/82 passing
+    apcore-typescript:    ✗ 79/82 passing — 3 DIVERGENT cases
+    apcore-rust:         ✓ 82/82 passing
+  Cross-language divergent cases: {N}
 ```
 
-If any repo fails:
-- Display failure details
+If any repo's unit tests fail OR any conformance case diverges:
+- Display failure / divergence details
 - Use `AskUserQuestion`: "How to proceed?"
-  - "Fix and retry" — investigate failures
-  - "Skip this repo" — exclude from release
+  - "Fix and retry" — investigate failures (route conformance divergences to `/code-forge:fix --review` consuming the tester report)
+  - "Skip this repo" — exclude from release (NOT available for conformance divergences — divergence means a lie about cross-language equivalence, cannot be skipped per-repo)
   - "Abort release" — stop everything, revert version bumps:
     For each repo already bumped in Step 3/4: `git -C {repo_path} checkout -- {list of modified files}`
     (Safe because Step 7 commit has not yet run — only uncommitted changes are discarded)
