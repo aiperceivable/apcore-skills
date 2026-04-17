@@ -105,7 +105,7 @@ Parse `$ARGUMENTS` for flags.
 2. Look up in discovered ecosystem:
    - `core-sdk` repo → audit this repo + sibling core-sdks in the same sync group, dimensions D1-D3, D5-D6, D8-D10 (D10 needs ≥2 repos in the same group to compare)
    - `mcp-bridge` repo → audit this repo + sibling mcp-bridges, dimensions D1-D3, D5-D6, D8-D10
-   - `integration` repo → audit only this repo, dimensions D2-D9 (D10 skipped — integrations have no cross-language peers)
+   - `integration` repo → audit this repo, dimensions D2-D10. For D10, auto-pull in the relevant core SDK (matching the integration's language — e.g., django-apcore → apcore-python; nestjs-apcore → apcore-typescript) AND the `apcore/` doc repo as **read-only peers** for the Consumer Contract Check (Step 4 of the D10 prompt). Dimensions D2–D9 still apply only to the integration repo itself.
    - `protocol`/`docs-site` repo → audit documentation dimensions (D4) and bloat (D9) for this repo
    - `shared-lib`/`tooling` repo → audit D2 (naming), D4 (docs), D5 (tests), D8 (structure), D9 (bloat) for this repo
    - CWD not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to audit?" with options from `repos[]` names + "All repos (full ecosystem audit)"
@@ -119,12 +119,16 @@ Parse `$ARGUMENTS` for flags.
 |---|---|---|
 | `core` | Core SDKs + `apcore/` doc repo | D1-D3, D5-D6, D8-D10 (D4 covers `apcore/` only) |
 | `mcp` | MCP bridges + `apcore-mcp/` doc repo | D1-D3, D5-D6, D8-D10 (D4 covers `apcore-mcp/` only) |
-| `integrations` | Framework integrations | D2-D9 (no cross-API sync; D10 only if ≥2 peers) |
+| `integrations` | Framework integrations + auto-pulled core SDKs (per-integration language) + `apcore/` doc repo as read-only peers | D2-D9 on integration repos; **D10 Consumer Contract Check** verifies each integration uses its matching core SDK per the core SDK's current Contract |
 | `all` | All repos | All dimensions |
 
 **D9 (Bloat & Redundancy) is always included.** It applies to every scope and every repo type — it is the apcore ecosystem's primary defense against the additive bias of skill-driven feature work.
 
-**D10 (Contract Parity) is included whenever ≥2 same-type repos are in scope.** It is the primary defense against intent divergence — the bug class where public signatures match but logic/purpose differs (e.g., one SDK validates inputs and the other doesn't; one emits an event and the other doesn't; one is thread-safe and the other isn't). When scope has only 1 repo of a given type, D10 is skipped with an INFO finding.
+**D10 (Contract Parity) is included in two modes:**
+1. **Parity mode** — runs whenever ≥2 same-type repos are in scope (e.g., multiple core SDKs, multiple MCP bridges). Detects intent divergence across language implementations — the bug class where public signatures match but logic/purpose differs (e.g., one SDK validates inputs and the other doesn't; one emits an event and the other doesn't; one is thread-safe and the other isn't).
+2. **Consumer Contract mode** — runs whenever at least one `integration` repo is in scope. The audit auto-pulls the matching core SDK (by language) and the `apcore/` doc repo as read-only peers, then verifies each integration uses the core SDK per its current Contract (input completeness, error handling, thread-safety assumption, deprecated API usage). See `references/dimension-prompts.md` D10 Step 4.
+
+Both modes can run in the same audit invocation — a `--scope all` run exercises both. When the current scope has only 1 same-type repo AND no integrations, D10 is skipped with an INFO finding.
 
 Display:
 ```
@@ -239,7 +243,7 @@ Repos audited: {count}
 
 **Contract Parity score formula:** Start at 100. Subtract 8 per `critical` D10 finding (intent divergence is a severe bug class), 3 per `warning`, 0.5 per `info`. Floor at 0. A contract parity score below 80 means at least one implementation is silently doing something different from its peers — must be fixed before release.
 
-If `--save` flag: write full report to specified path.
+If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/audit-report-{YYYY-MM-DD}.md`.
 
 ---
 

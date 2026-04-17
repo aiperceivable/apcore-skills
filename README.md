@@ -13,7 +13,7 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
 | `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--save report.md]` | Deep cross-repo consistency audit — 10 dimensions including **D10 Contract Parity** (intent/logic). Emits review-compatible output consumable by `/code-forge:fix --review`. |
-| `/apcore-skills:tester` | `[<repos...>] [--spec <feature>] [--mode generate\|run\|full] [--category unit\|integration\|boundary\|protocol\|all] [--save report.md]` | Spec-driven test generation & cross-language behavioral verification |
+| `/apcore-skills:tester` | `[<repos...>] [--spec <feature>] [--mode generate\|run\|full] [--category unit\|integration\|boundary\|protocol\|contract\|conformance\|all] [--save report.md]` | Spec-driven test generation & cross-language behavioral verification (incl. Contract-derived tests and shared conformance fixtures) |
 | `/apcore-skills:release` | `<version> [--scope core\|mcp\|integrations\|all] [--dry-run]` | Coordinated multi-repo release pipeline |
 
 ## Ecosystem

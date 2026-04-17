@@ -171,9 +171,18 @@ For each repo with issues, use `AskUserQuestion` to resolve:
 
 Before bumping any version, run the ecosystem consistency skills and block the release if any CRITICAL finding exists. This prevents shipping known intent divergences, API mismatches, or contract parity gaps.
 
+**Dry-run handling.** When `--dry-run` is active, the gate runs identically (same audit, same sync, same decision rule) but:
+- Reports are written to OS tempfiles (e.g., via `mktemp` to `/tmp/apcore-release-gate-{version}-XXXX.md`), NOT to the canonical `{ecosystem_root}/release-{audit|sync|tester}-*.md` paths — dry-run must not pollute the dashboard's "latest report" glob.
+- Every gate line in the user-visible output is prefixed with `[DRY-RUN]`.
+- BLOCK / WARN / PASS decisions are still computed and displayed — dry-run's purpose includes surfacing gate failures.
+- No `release-overrides-*.md` is ever written on dry-run (override is not relevant when nothing is being mutated).
+- After dry-run completes (PASS, WARN, or BLOCK), report the gate decision and stop — subsequent steps (3–9) are dry-run simulated per each step's own dry-run semantics.
+
 #### 2.5.1 Run Audit
 
-Invoke `/apcore-skills:audit --scope {scope} --save {ecosystem_root}/release-audit-{version}.md` (scope is the release scope from Step 1.2; if scope is `integrations` or CWD-only-integration, use that scope — integrations still audit D2–D9).
+Invoke audit with scope from Step 1.2 (if scope is `integrations` or CWD-only-integration, use that scope — integrations now audit D2–D10 incl. consumer-contract check per audit/SKILL.md §D10):
+- Normal run: `/apcore-skills:audit --scope {scope} --save {ecosystem_root}/release-audit-{version}.md`
+- Dry-run: `/apcore-skills:audit --scope {scope} --save {mktemp}/release-audit-{version}.md`
 
 Wait for audit to complete. Parse the saved report for:
 - **CRITICAL count** across dimensions D1–D10
@@ -191,6 +200,9 @@ Scope mapping:
 - `mcp` → `--scope mcp`
 - `all` → `--scope all`
 - `integrations` → skip sync (integrations have no cross-language peers by design)
+
+Normal run: `--save {ecosystem_root}/release-sync-{version}.md`.
+Dry-run: `--save {mktemp}/release-sync-{version}.md`.
 
 Wait for sync to complete. Parse the saved report for:
 - CRITICAL findings in Phase A (spec ↔ impl) and Phase B (docs)
@@ -212,19 +224,21 @@ Sync report: release-sync-{version}.md
   Contract tier divergences: {N}
 ```
 
-**Decision rule:**
+**Decision rule (evaluate in order — first match wins):**
 
-| Audit CRITICAL | Sync CRITICAL | D10 score | Action |
-|---|---|---|---|
-| 0 | 0 | ≥ 90 | **PASS** — continue to Step 3 |
-| > 0 or > 0 | any | any | **BLOCK** — present findings, `AskUserQuestion` |
-| 0 | 0 | 70–89 | **WARN** — show summary, `AskUserQuestion` whether to continue |
-| 0 | 0 | < 70 | **BLOCK** — contract parity too low for release |
+1. **BLOCK (critical findings)** — if `audit_critical > 0` OR `sync_critical > 0` → BLOCK. Present findings, `AskUserQuestion`. Critical findings dominate any score.
+2. **BLOCK (contract parity too low)** — else if `d10_score < 70` → BLOCK. Contract parity below 70 means intent is silently diverging somewhere; this is not shippable regardless of individual finding counts.
+3. **WARN** — else if `d10_score < 90` → WARN. Show summary, `AskUserQuestion` whether to continue.
+4. **PASS** — else (audit_critical = 0 AND sync_critical = 0 AND d10_score ≥ 90) → continue to Step 3.
 
-**When BLOCKED**, display the top 5 findings by severity (cite the finding IDs from the saved reports) and use `AskUserQuestion`:
+Note: rule 1 uses OR on two counts — either source of critical findings blocks. Rules 2-4 only evaluate when rule 1 did not match. The precedence is: critical count > contract parity score > all clean.
+
+**When BLOCKED** (normal run), display the top 5 findings by severity (cite the finding IDs from the saved reports) and use `AskUserQuestion`:
 - "Run /code-forge:fix --review on the audit + sync reports" — delegates fix-up; after fixes complete, user re-invokes `/apcore-skills:release`
 - "Abort release" — stop; no mutations have been made yet
-- "Override and continue (requires rationale)" — `AskUserQuestion` follow-up: "Provide rationale for shipping with known critical findings" (free-form text); append the rationale to `{ecosystem_root}/release-overrides-{version}.md` with timestamp, user identity from `git config user.email`, and the list of unfixed finding IDs. Only then continue to Step 3.
+- "Override and continue (requires rationale)" — `AskUserQuestion` follow-up: "Provide rationale for shipping with known critical findings" (free-form text); append the rationale to `{ecosystem_root}/release-overrides-{version}.md` with timestamp, user identity (run `git -C {primary_release_repo} config user.email` where `primary_release_repo` is the first repo in the release scope; fall back to `whoami` + hostname if that is empty), and the list of unfixed finding IDs. Only then continue to Step 3.
+
+**When BLOCKED (dry-run),** display the findings with `[DRY-RUN]` prefix and stop. No override option is offered (nothing to override — no mutation is pending). User fixes and re-runs.
 
 **When WARN (medium D10 score)**, display summary and ask `AskUserQuestion`: "Continue release?" → continue | "Run fix first" | "Abort".
 

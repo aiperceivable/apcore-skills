@@ -630,7 +630,7 @@ Spec sources: {spec_repo_names and doc counts}
   To re-verify after fix: run /apcore-skills:tester --mode run
 ```
 
-If `--save` flag: write full report to specified path.
+If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/tester-report-{YYYY-MM-DD}.md`.
 
 #### 5.1 Review-Compatible Issue Report
 

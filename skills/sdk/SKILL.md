@@ -326,10 +326,14 @@ Parse the saved report for:
 
 #### 9.5.3 Gate Decision
 
-| Sync CRITICAL | Contract divergences | Fixture divergences | Action |
-|---|---|---|---|
-| 0 | 0 | 0 | **PASS** — proceed to Step 10 |
-| any > 0 | any | any | **FAIL** — present findings |
+**Rule:** PASS if and only if **all three** of the following are zero:
+- `sync_critical` — CRITICAL findings from `/apcore-skills:sync` (Phase A + Phase B + contract tier)
+- `contract_divergences` — sync Step 4B / audit D10 findings (counted from the sync report's Contract tier section)
+- `fixture_divergences` — cross-language conformance matrix mismatches from tester (Matrix B in tester Step 4)
+
+If any of the three is greater than zero → **FAIL**. Present the highest-severity findings first.
+
+Rationale: all three counts measure distinct failure modes (signature mismatch, intent mismatch, behavioral mismatch). None of them is acceptable in a just-bootstrapped SDK; tolerating one silently defeats the post-impl gate's purpose.
 
 On FAIL, display the top findings and use `AskUserQuestion`:
 - "Run /code-forge:fix --review" — consumes the sync + tester review-compatible outputs and auto-patches

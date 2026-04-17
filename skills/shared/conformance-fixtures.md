@@ -273,6 +273,6 @@ Coverage gaps go into the tester report's Coverage Gaps section — they don't f
 
 - **spec-forge**: when generating feature specs with Contract blocks, optionally scaffold a matching empty fixture YAML.
 - **sdk**: new SDK bootstrap includes a stub `conformance_runner.{ext}` that reads fixtures and reports UNSUPPORTED for every op. The runner is filled in as the SDK matures.
-- **tester**: primary consumer. See `skills/tester/SKILL.md` Step 1.5 and Step 3.
+- **tester**: primary consumer. See `skills/tester/SKILL.md` Step 1.4 (load fixtures) and Step 3.5 (run conformance runners).
 - **sync**: `--internal-check=behavior` optionally consumes the tester conformance report as a higher-fidelity signal than per-language unit tests.
 - **audit**: D10 may cross-check that extracted repo contracts don't declare properties contradicted by fixture results.

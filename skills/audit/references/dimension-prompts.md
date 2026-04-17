@@ -440,7 +440,7 @@ BLOAT_SUMMARY:
 
 ## D10 — Contract Parity (Intent / Logic Consistency)
 
-```
+~~~
 Audit behavioral-contract parity across apcore SDK implementations of the same type.
 
 Repos to compare: {repo_paths}
@@ -591,22 +591,21 @@ For each integration repo, verify it USES the core SDK according to the core SDK
 
 4. Emit findings with `category: consumer_contract`, `repo: {integration-repo}`, and `location` pointing to the integration file's call site.
 
-Additional fields in CONTRACT_MATRIX for integration consumer rows:
-```
-- symbol: {method}
-  consumer_repo: {integration-name}
-  core_sdk_contract_ref: apcore/docs/features/{file}.md#Contract.{Class}.{method}
-  call_sites: [{file:line}, ...]
-  rows:
-    - row: input.completeness
-      status: PASS|FAIL
-      missing: [{param1}, ...]
-    - row: error.handling.{ErrorType}
-      status: PASS|FAIL|WARN
-      handled_at: {file:line or "(none)"}
-    - row: property.{thread_safe|idempotent|...}
-      integration_assumes: true|false|null
-      core_sdk_declares:   true|false
-      status: PASS|FAIL
-```
-```
+Additional fields in CONTRACT_MATRIX for integration consumer rows (indented block — already inside the outer prompt):
+
+    - symbol: {method}
+      consumer_repo: {integration-name}
+      core_sdk_contract_ref: apcore/docs/features/{file}.md#Contract.{Class}.{method}
+      call_sites: [{file:line}, ...]
+      rows:
+        - row: input.completeness
+          status: PASS|FAIL
+          missing: [{param1}, ...]
+        - row: error.handling.{ErrorType}
+          status: PASS|FAIL|WARN
+          handled_at: {file:line or "(none)"}
+        - row: property.{thread_safe|idempotent|...}
+          integration_assumes: true|false|null
+          core_sdk_declares:   true|false
+          status: PASS|FAIL
+~~~

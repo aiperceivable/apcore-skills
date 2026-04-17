@@ -163,6 +163,32 @@ Repos discovered: {count}
   shared-lib    | apcore-discovery-python | Python     | —       | clean
 ```
 
+#### 0.6a Canonical Report Save Paths
+
+Every skill that produces a report and accepts `--save` MUST use these canonical default file names so the dashboard and downstream tools can discover the newest report by glob. The paths are relative to `ecosystem_root`. Explicit `--save <path>` arguments override these defaults.
+
+| Skill | Invocation | Canonical default path |
+|---|---|---|
+| audit | `/apcore-skills:audit --save` (no arg) | `{ecosystem_root}/audit-report-{YYYY-MM-DD}.md` |
+| audit (from release gate) | release Step 2.5.1 | `{ecosystem_root}/release-audit-{version}.md` |
+| sync | `/apcore-skills:sync --save` (no arg) | `{ecosystem_root}/sync-report-{YYYY-MM-DD}.md` |
+| sync Phase A only | `/apcore-skills:sync --phase a --save` | `{ecosystem_root}/sync-report-phase-a-{YYYY-MM-DD}.md` |
+| sync Phase B only | `/apcore-skills:sync --phase b --save` | `{ecosystem_root}/sync-report-phase-b-{YYYY-MM-DD}.md` |
+| sync (from release gate) | release Step 2.5.2 | `{ecosystem_root}/release-sync-{version}.md` |
+| tester | `/apcore-skills:tester --save` (no arg) | `{ecosystem_root}/tester-report-{YYYY-MM-DD}.md` |
+| tester (from release gate) | release Step 6 | `{ecosystem_root}/release-tester-{version}.md` |
+| tester (from sdk gate) | sdk Step 9.5.2 | `{ecosystem_root}/sdk-bootstrap-tester-{target-repo-name}.md` |
+| release overrides | release Step 2.5.3 BLOCK override | `{ecosystem_root}/release-overrides-{version}.md` |
+| sdk gate sync | sdk Step 9.5.1 | `{ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md` |
+| sdk gate overrides | sdk Step 9.5.3 manual override | `{ecosystem_root}/sdk-gate-overrides.md` |
+
+**Dashboard glob patterns** (cited from this table in `commands/apcore-skills.md`):
+- Latest audit: newest mtime match of `{ecosystem_root}/audit-report-*.md` OR `{ecosystem_root}/release-audit-*.md`
+- Latest sync: newest match of `{ecosystem_root}/sync-report-*.md` OR `{ecosystem_root}/release-sync-*.md` (ignore `-phase-a-` / `-phase-b-` partials — prefer combined report)
+- Latest tester: newest match of `{ecosystem_root}/tester-report-*.md` OR `{ecosystem_root}/release-tester-*.md` OR `{ecosystem_root}/sdk-bootstrap-tester-*.md`
+
+If `--save` is passed with an explicit path, use the explicit path verbatim (including relative paths from CWD). The dashboard glob will only find files under `ecosystem_root` matching the pattern — explicit paths are the operator's responsibility to track.
+
 #### 0.7 Store Ecosystem Context
 
 Track resolved values for subsequent steps:

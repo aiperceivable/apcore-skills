@@ -73,7 +73,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|skeleton|behavior] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--save]
 ```
 
 | Argument / Flag | Default | Description |
@@ -618,7 +618,7 @@ FAIL items (expanded):
      TypeScript: (moduleId: string, input: Record<string, unknown>) -> ExecutionResult  ✗ missing context param
 ```
 
-If `--save` flag: write report to `{ecosystem_root}/sync-report-phase-a-{date}.md`.
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-a-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
 
 If `--phase a` only: display this report and stop. Otherwise continue to Phase B.
 
@@ -774,7 +774,7 @@ Store merged findings in `phase_b_behavior_findings` for inclusion in Step 8 and
   Link consistency: {PASS|FAIL}
 ```
 
-If `--save` flag: write report to `{ecosystem_root}/sync-report-phase-b-{date}.md`.
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-b-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
 
 ---
 
@@ -860,7 +860,7 @@ INFO:
   Contradictions (cross-repo): {N}
 ```
 
-If `--save` flag: write report to `{ecosystem_root}/sync-report-{date}.md`.
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
 
 #### 9.1 Review-Compatible Issue Report
 

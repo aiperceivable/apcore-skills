@@ -32,11 +32,11 @@ Run the ecosystem discovery from the shared ecosystem module:
 2. Scan for all apcore repositories
 3. Extract versions from build config files
 4. Check git status for each repo
-5. **Surface consistency health** — scan `{ecosystem_root}` for the most recent reports and summarize their key scores:
-   - `sync-report-*.md` (from `/apcore-skills:sync --save`) — pick the newest by mtime. Extract Phase A contract section, Phase B contradictions, overall critical count.
-   - `release-audit-*.md` (from release gate) or ad-hoc `audit-report-*.md` — pick the newest. Extract D9 Leanness score and D10 Contract Parity score from the Health Score section.
-   - `release-tester-*.md` or `tester-*.md` — pick the newest. Extract conformance pass rate and divergent case count.
-   - If no reports exist, show `"— no recent reports; run /apcore-skills:audit --save to populate"`.
+5. **Surface consistency health** — use the canonical glob patterns from `skills/shared/ecosystem.md` §0.6a (single source of truth for report paths):
+   - Latest audit: newest mtime match of `{ecosystem_root}/audit-report-*.md` ∪ `{ecosystem_root}/release-audit-*.md`. Extract D9 Leanness and D10 Contract Parity scores from the Health Score section.
+   - Latest sync: newest match of `{ecosystem_root}/sync-report-*.md` ∪ `{ecosystem_root}/release-sync-*.md` — EXCLUDE `-phase-a-` / `-phase-b-` partials (prefer combined reports). Extract Phase A / Phase B FAIL counts and contract-tier divergences.
+   - Latest tester: newest match of `{ecosystem_root}/tester-report-*.md` ∪ `{ecosystem_root}/release-tester-*.md` ∪ `{ecosystem_root}/sdk-bootstrap-tester-*.md`. Extract conformance pass rate and divergent case count.
+   - If no reports exist for a given signal, show `"— no recent report; run /apcore-skills:{audit|sync|tester} --save to populate"`.
 
 Display:
 
@@ -91,7 +91,7 @@ Commands:
   /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--save report.md]
       Deep cross-repo consistency audit
 
-  /apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|all] [--save report.md]
+  /apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|contract|conformance|all] [--save report.md]
       Spec-driven test generation & cross-language behavioral verification
 
   /apcore-skills:release <version> [--scope core|mcp|integrations|all] [--dry-run]
