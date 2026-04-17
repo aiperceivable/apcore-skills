@@ -459,7 +459,7 @@ Read `shared/api-extraction.md` Step E.4b for the per-method contract extraction
 For each `docs/features/*.md` in {doc_repo_path}:
 1. Find every `## Contract: ClassName.method_name` block
 2. Parse `### Inputs`, `### Preconditions`, `### Side Effects`, `### Postconditions`, `### Errors`, `### Returns`, `### Properties`
-3. Store as spec_contracts[symbol]
+3. Store as `spec_contracts[scope][symbol]` — canonical two-level keying per `shared/contract-spec.md` §Canonical Storage Shape. `scope` is the doc-repo group (derived from `{doc_repo_path}` — e.g., `apcore/` → `core`, `apcore-mcp/` → `mcp`). `symbol` is `ClassName.method_name` in canonical snake_case.
 
 If {doc_repo_path} is empty OR no Contract blocks found, enter cross-repo-only mode (compare repos
 against each other without spec authority — any divergence is still a bug).
@@ -563,7 +563,12 @@ CONTRACT_MATRIX:
     - row: property.{async|thread_safe|pure|idempotent|reentrant}
       ...
 
-Target output size: keep CONTRACT_MATRIX to at most 30 symbols (the ones with at least one divergence); summarize fully-passing symbols as a count "N symbols fully match, not listed".
+Target output size: keep CONTRACT_MATRIX to at most **15 symbols** (the ones with most severe divergences first — critical before warning). Additionally cap total byte count at **20 kB**: stop emitting CONTRACT_MATRIX rows once the cumulative bytes reach 20 kB and append a tail:
+
+    TRUNCATED_SYMBOLS: [symbol1, symbol2, ...]   # names only, no per-row expansion
+    TRUNCATION_REASON: "exceeded 15-symbol limit | exceeded 20 kB byte budget | both"
+
+Summarize fully-passing symbols as a count "N symbols fully match, not listed". A follow-up `/apcore-skills:audit` run filtered to specific symbols can expand the truncated entries if needed.
 
 === Step 4 (integration-specific): Consumer Contract Check ===
 
@@ -575,7 +580,7 @@ For each integration repo, verify it USES the core SDK according to the core SDK
    - Python integrations: grep for `from apcore import` / `import apcore.`; then find every method call on imported symbols (`Registry(...)`, `Executor(...).execute(...)`, `Context(...)`, etc.)
    - TypeScript integrations: grep for `from "apcore-js"` / `from "apcore"`; find every method call
    - Go integrations: grep for `"github.com/aipartnerup/apcore-go"` imports; find every call
-   - Rust integrations: grep for `use apcore::`; find every call
+   - Rust integrations: (a) parse `Cargo.toml` `[dependencies]` for any crate named `apcore` or matching `apcore-*` — this is the ground truth for which crates are in use; (b) grep source for `use apcore`, `use apcore_`, `apcore::`, `apcore_[a-z]+::` to find the call sites; (c) also check any project-specific prelude module (typically `src/prelude.rs` or re-exports in `lib.rs`) for pub-use chains that hide direct `apcore::` references. A workspace or prelude re-export still counts as a call site.
 
 2. For each call site, extract:
    - What public method is invoked (canonical method name)

@@ -226,14 +226,7 @@ Sync report: release-sync-{version}.md
   Contract tier divergences: {N}
 ```
 
-**Decision rule (evaluate in order — first match wins):**
-
-1. **BLOCK (critical findings)** — if `audit_critical > 0` OR `sync_critical > 0` → BLOCK. Present findings, `AskUserQuestion`. Critical findings dominate any score.
-2. **BLOCK (contract parity too low)** — else if `d10_score < 70` → BLOCK. Contract parity below 70 means intent is silently diverging somewhere; this is not shippable regardless of individual finding counts.
-3. **WARN** — else if `d10_score < 90` → WARN. Show summary, `AskUserQuestion` whether to continue.
-4. **PASS** — else (audit_critical = 0 AND sync_critical = 0 AND d10_score ≥ 90) → continue to Step 3.
-
-Note: rule 1 uses OR on two counts — either source of critical findings blocks. Rules 2-4 only evaluate when rule 1 did not match. The precedence is: critical count > contract parity score > all clean.
+**Decision rule:** defined canonically in `shared/scoring.md` §Release Gate Thresholds. Apply the 4-rule first-match precedence from that file verbatim. If `shared/scoring.md` thresholds change, the release gate behavior changes — do not duplicate the numbers here.
 
 **When BLOCKED** (normal run), display the top 5 findings by severity (cite the finding IDs from the saved reports) and use `AskUserQuestion`:
 - "Run /code-forge:fix --review on the audit + sync reports" — delegates fix-up; after fixes complete, user re-invokes `/apcore-skills:release`

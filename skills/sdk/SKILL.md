@@ -198,8 +198,8 @@ If they don't exist:
       - `### Inputs` — from reference method parameter list + any visible validation guards in reference source (grep for `if not X: raise`, early-return patterns); leave `validation` / `reject_with` as `TODO` when the reference has no guard
       - `### Errors` — from `raise X`/`throw new X`/`return Err(X)` sites in the reference method; resolve codes where visible
       - `### Returns` — from reference return type
-      - `### Properties` — fill `async` from reference signature; others default to `TODO`
-      - `### Side Effects` / `### Preconditions` / `### Postconditions` — emit as `TODO — fill in during implementation` (do NOT invent)
+      - `### Properties` — fill `async` from reference signature; others render as `null` with an inline `# TODO — fill during implementation` comment (never as the literal string `"TODO"` — that violates the contract-spec format; see `shared/contract-spec.md` §Properties)
+      - `### Side Effects` / `### Preconditions` / `### Postconditions` — emit as a bulleted `TODO — fill in during implementation` placeholder (these are free-form prose sections, so a literal TODO comment is fine — only the scalar Properties field requires `null`)
 - **Never emit an empty Contract block.** If literally no inference is possible, skip the method and surface it in the summary as "Contract skeleton not generated for {method} — insufficient reference signal; fill by hand".
 - Display: `Feature specs generated: {N} specs, {M} Contract blocks (filled: {filled}, TODO: {todo})`
 

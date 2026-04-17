@@ -57,12 +57,17 @@ A feature spec SHOULD declare one `## Contract:` block per public method on ever
 - On failure: raises the corresponding error type (each language uses its idiomatic error propagation)
 
 ### Properties
-- idempotent: false   # re-registering the same id raises DuplicateError
-- thread_safe: true   # internal write lock serializes concurrent callers
+- idempotent: false
+- thread_safe: true
 - async: false
-- pure: false         # mutates registry state
+- pure: false
 - reentrant: false
 ```
+
+> **Property rationales** (for the example above — these explain *why* each value was chosen; they are not part of the block syntax):
+> - `idempotent: false` — re-registering the same id raises `DuplicateError`, so the second call's outcome differs from the first
+> - `thread_safe: true` — the internal write lock serializes concurrent callers
+> - `pure: false` — the method mutates the registry index (observable state change)
 
 #### Field Semantics
 
@@ -80,7 +85,13 @@ A feature spec SHOULD declare one `## Contract:` block per public method on ever
 
 **`### Returns`** — return value shape on success. Use canonical type names; language mapping is handled by `api-extraction.md` E.4.
 
-**`### Properties`** — scalar behavioral flags. Each property must be true or false (not "sometimes"). Supported:
+**`### Properties`** — scalar behavioral flags. Each property must be **true**, **false**, or **null** (not a free-form string like `TODO`). `null` explicitly means "not yet determined" and is only valid in newly-scaffolded specs; parsers treat `null` as "unknown / cannot be compared" per sync Step 4B Properties parity rule. Strings like `"TODO"` or `"?"` are a spec-format violation and audit D4 flags them as `info` (contract_coverage / partial). When scaffolding a Contract skeleton where a property's value is not yet known, render it as:
+
+```yaml
+thread_safe: null  # TODO — fill during implementation (true if internal lock, false if races possible)
+```
+
+Supported properties:
 
 | Property | Meaning | Typical divergence bug |
 |---|---|---|
@@ -152,6 +163,28 @@ A Contract block MUST contain at minimum:
 - `### Properties` with at least `thread_safe` and `async`
 
 Optional fields (`### Preconditions`, `### Postconditions`, `### Side Effects`) are recommended but not enforced.
+
+#### Canonical Storage Shape
+
+Skills that parse `## Contract:` blocks MUST store them using the canonical shape:
+
+```
+spec_contracts[scope][symbol] = {
+  inputs: [...],
+  preconditions: [...],
+  side_effects: [...],
+  postconditions: [...],
+  errors: [...],
+  returns: {...},
+  properties: {async, thread_safe, pure, idempotent, reentrant}
+}
+```
+
+Where:
+- `scope` ∈ {`core`, `mcp`, `a2a`, `toolkit`, …} — the doc-repo group the Contract was parsed from
+- `symbol` = canonical `ClassName.method_name` (snake_case method, PascalCase class)
+
+Skills consuming spec contracts (audit D10, sync Step 4B, tester Step 1.3) MUST use this two-level keying. A single-level flat `spec_contracts[symbol]` is a bug — it breaks cross-scope isolation (e.g., `Registry.register` exists with different contracts in `core` and `mcp`).
 
 #### Interaction with Algorithm Sections
 

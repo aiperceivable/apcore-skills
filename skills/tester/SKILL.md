@@ -216,7 +216,21 @@ Store as `spec_clauses[]`:
 }
 ```
 
-If a feature spec defines a public method but has **no `## Contract:` block**, emit a WARNING clause `"{file} declares {Method} with no Contract block — only narrative clauses generated, no contract-category tests"`. This surfaces spec debt directly in the tester report (and aligns with audit D4's finding).
+If a feature spec defines a public method but has **no `## Contract:` block**, DO NOT emit this as a clause (it would pollute `spec_clauses[]` with an entry that has no inputs / expected / category). Instead, append an entry to a separate `spec_warnings[]` list:
+
+```
+{
+  id: "no-contract-{file-slug}-{method-slug}",
+  severity: "warning",
+  kind: "no_contract_block",
+  source_file: "{file}",
+  symbol: "{Method}",
+  detail: "{file} declares {Method} with no Contract block — only narrative clauses generated, no contract-category tests",
+  fix: "Add a ## Contract: block per shared/contract-spec.md (see skill reference for template)"
+}
+```
+
+`spec_warnings[]` is consumed by Step 5.1 review-compatible output (severity `warning`, file = `{source_file}`, suggestion = the Contract block template), parallel to D4's finding in audit. Keeps `spec_clauses[]` type-pure — every entry has a usable input/expected shape.
 
 #### 1.4 Load Shared Conformance Fixtures
 
@@ -616,7 +630,7 @@ Spec sources: {spec_repo_names and doc counts}
 
   Total generated tests: {N}
   Non-trivial assertions: {N}
-  Stub detected (rejected): {N}     — blocked from commit, rewritten via fallback
+  Stub detected (rejected): {N}     — auto-converted to skip("needs spec clarification — clause too vague") with the clause-id preserved so re-run can detect when the spec is fixed
   Skipped with explicit reason: {N} — listed below for spec clarification
 
   Skips needing spec clarification:
@@ -672,7 +686,7 @@ Severity mapping:
 | Matrix B (fixture) divergence | blocker |
 | Matrix A inconsistency on `contract`-category clause | critical |
 | Matrix A inconsistency on `unit` / `boundary` clause | critical |
-| Authenticity-blocked stub (test body was trivial) | warning |
+| Authenticity-blocked stub (test body was trivial) | warning — **aggregate one finding per repo**, not per stub; list the clause-ids in `description`. N stubs in one repo produce 1 review entry, not N. |
 | Fixture coverage gap | warning |
 | Spec missing `## Contract:` block (from Step 1.3 warning) | warning |
 

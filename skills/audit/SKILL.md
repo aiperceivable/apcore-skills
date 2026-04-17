@@ -239,9 +239,7 @@ Repos audited: {count}
   Contract Parity (D10): {score}/100
 ```
 
-**Leanness score formula:** Start at 100. Subtract 5 per `critical` D9 finding, 2 per `warning`, 0.5 per `info`. Floor at 0. A leanness score below 70 indicates the repo needs a dedicated cleanup pass before the next release.
-
-**Contract Parity score formula:** Start at 100. Subtract 8 per `critical` D10 finding (intent divergence is a severe bug class), 3 per `warning`, 0.5 per `info`. Floor at 0. A contract parity score below 80 means at least one implementation is silently doing something different from its peers — must be fixed before release.
+**Score formulas:** Leanness (D9) and Contract Parity (D10) formulas are defined canonically in `shared/scoring.md`. Use those formulas — do not re-implement. Any threshold change (e.g., release-gate BLOCK threshold) must be updated there, not inline here.
 
 If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/audit-report-{YYYY-MM-DD}.md`.
 
@@ -282,7 +280,8 @@ Use the `# Project Review:` header with a dynamic scope description (derived fro
 | D3 | critical | blocker | Version mismatch within sync group before release |
 | D3 | warning | warning | Version file inconsistency within a repo |
 | D4 | warning | warning | Spec lacks `## Contract:` block for a public symbol; README section missing |
-| D4 | info | _(skip)_ | Minor docstring gaps |
+| D4 | info (category=`contract_coverage`, detail mentions missing Contract fields) | warning | **Exception to the info-skip rule** — Contract block exists but is missing required fields (Inputs / Errors / Returns / Properties). These are actionable partial-contract gaps that should reach `/code-forge:fix --review`. Detect by matching `category == "contract_coverage"` AND detail mentions "missing field" or "incomplete". |
+| D4 | info (other) | _(skip)_ | Minor docstring gaps, missing CHANGELOG badge, etc. |
 | D5 | critical | critical | Tests fail |
 | D5 | warning | warning | Test runner unavailable / deps missing |
 | D6 | critical | blocker | Incompatible SDK version referenced |

@@ -57,7 +57,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | "Deprecated APIs in docs are just stale" | If CHANGELOG says an API was removed in v0.18.0 but docs still reference it, users following the docs will hit errors on the current version. Cross-check CHANGELOG Removed sections against doc examples. |
 | "PRD is product-level, no need to check against code" | If the PRD says a feature exists but no implementation matches, that is a gap. Every layer must agree. |
 | "Internal helpers should also be 1-to-1 across languages" | NO. Function-level identity (helper names, decomposition, line count) conflicts with each language's design (Rust ownership splits, Go's no-default-args, Python list comprehensions). **BUT** intent / logic / purpose MUST be identical across languages — that is enforced by the CONTRACT tier (default ON, Step 4B), the SKELETON tier (opt-in, Step 4A — algorithm checkpoint sequence), and the BEHAVIOR tier (opt-in, Step 7.5 — runtime equivalence via `tester`). Helper-name parity is never enforced at any tier. |
-| "Same public signature means same intent" | NO. Two `register(id, module)` methods can share the same signature yet diverge in logic — one validates before mutating, another writes first and rolls back on error; one raises on duplicate, another silently overwrites; one is thread-safe, another races. These are intent-level bugs. The CONTRACT tier compares inputs validation rules, errors raised, side-effect order, return shape, and behavioral properties (async/thread-safe/pure/idempotent/reentrant) against the spec's `## Contract` block — or cross-repo when spec is silent. |
+| "Same public signature means same intent" | NO. Two `register(id, module)` methods can share the same signature yet diverge in logic — one validates before mutating, another writes first and rolls back on error; one raises on duplicate, another silently overwrites; one is thread-safe, another races. These are intent-level bugs. The CONTRACT tier compares inputs validation rules, errors raised, side-effect order, return shape, and behavioral properties (async/thread-safe/pure/idempotent/reentrant) against the spec's `## Contract:` block — or cross-repo when spec is silent. |
 | "Trait satisfaction is a Rust thing, skip it for other languages" | Every language has an equivalent: Python `__str__` / TS `toString()` / Go `String()` / Rust `impl Display`. The protocol spec defines required interface contracts; each language must satisfy them with its idiomatic mechanism. Build a dedicated checklist row. |
 | "Multiple constructors are language-specific sugar" | Rust's `Self::new()` / `Self::with_config()` / `Self::from_env()` corresponds to Python `classmethod` factories, TS static factories, Go `NewX` / `NewXFromY`. If the spec defines multiple construction paths, every language must expose all of them. Treat constructors as a list, not a single entry. |
 
@@ -533,7 +533,12 @@ The literal prefix is `checkpoint:` followed by a snake_case identifier. Sub-age
 }
 ```
 
-The `location` field points to the implementation file that needs changing (for spec-silent cross-repo divergence, pick the repo that is the outlier; for spec-authority divergence, the location is every non-matching repo).
+**Emit rule: one finding per divergent repo, not one finding with a multi-repo `location` list.** The `location` field is a single file path. Rationale:
+
+- Spec-authority divergence with 3 non-matching repos → emit 3 findings, each with its own `location` pointing at that repo's offending file. Share the same `symbol` + `row` + `spec_says` across the three; each gets a distinct `finding_id` (e.g., `A-C-017`, `A-C-018`, `A-C-019`).
+- Spec-silent cross-repo divergence → pick the outlier repo (the one that disagrees with the majority, or with the most-reference repo `apcore-python`) and emit a single finding for that repo. If no clear outlier (even split), emit one finding per dissenting repo.
+
+This keeps `location` as a single string (compatible with `/code-forge:fix --review` schema) and keeps every finding directly actionable on exactly one file.
 
 ---
 
@@ -785,6 +790,13 @@ apcore-skills sync — Unified Consistency Report
 
 Scope: {scope} | Languages: {langs} | Date: {date}
 Phases: A (spec ↔ code) + B (documentation)
+
+Finding ID namespaces:
+  A-{seq}     Phase A signature / type / naming findings (Step 4.1–4.3)
+  A-S-{seq}   Phase A skeleton findings (Step 4A — only when --internal-check >= skeleton)
+  A-C-{seq}   Phase A contract findings (Step 4B — default when --internal-check >= contract)
+  B-{seq}     Phase B documentation findings (Steps 6–8)
+  All IDs are stable within a single run; regenerated per invocation.
 
 ═══ PHASE A: Spec ↔ Implementation ═══
 

@@ -62,6 +62,13 @@ The apcore ecosystem consists of:
 5. Optional: `.apcore-skills.json` in the ecosystem root to customize discovery and version groups
 6. **[code-forge](https://github.com/tercel/code-forge)** skill required for `sdk` and `integration` commands (generates `.code-forge.json` and uses `code-forge:port`, `code-forge:plan`, `code-forge:impl`)
 
+## Breaking Changes (v0.10+)
+
+- **sync `--internal-check` default changed from `none` to `contract`.** Every `/apcore-skills:sync` invocation without an explicit flag now runs Phase A signatures *plus* the contract-tier comparison (Step 4B). This is a stricter default than v0.9 and may surface pre-existing L2 intent divergences in repos that had never opted into contract checking.
+- **To preserve v0.9 behavior** (Phase A signatures only), pass `--internal-check=none` explicitly: `/apcore-skills:sync --internal-check=none`.
+- **audit D4** now warns when a feature spec's public symbol has no `## Contract:` block. Existing specs without Contract blocks will produce new warnings until filled in.
+- **release Step 2.5** consistency gate is mandatory before version bump. Critical audit/sync findings block release unless explicitly overridden with rationale (logged).
+
 ## Consistency Layers
 
 The ecosystem enforces consistency at three distinct layers — each layer has a different goal and a different skill responsible for it:
