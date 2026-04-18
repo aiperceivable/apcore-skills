@@ -185,8 +185,10 @@ Invoke audit with scope from Step 1.2 (if scope is `integrations` or CWD-only-in
 - Dry-run: `/apcore-skills:audit --scope {scope} --save {mktemp}/release-audit-{version}.md`
 
 Wait for audit to complete. Parse the saved report for:
-- **CRITICAL count** across dimensions D1–D10
+- **CRITICAL count** across dimensions D1–D11
 - **Contract Parity score** (D10) — from the Health Score section
+- **Deep-Chain Parity score** (D11) — from the Health Score section
+- **D11 critical count** (chain-level divergences are never acceptable at release time — see scoring.md release gate rule 3)
 - **Leanness score** (D9) — from the Health Score section
 
 #### 2.5.2 Run Sync (only when scope has ≥2 peer repos)
@@ -208,7 +210,8 @@ Dry-run: `/apcore-skills:sync --scope {mapped} --save {mktemp}/release-sync-{ver
 
 Wait for sync to complete. Parse the saved report for:
 - CRITICAL findings in Phase A (spec ↔ impl) and Phase B (docs)
-- Contract tier (Step 4B) divergences
+- Contract tier (Step 4B) divergences — A-C-* namespace
+- **Deep-chain tier (Step 4C) divergences — A-D-* namespace — `critical`, `warning`, and `inconclusive` counts are all release-relevant**
 
 #### 2.5.3 Aggregate Gate Decision
 
@@ -217,16 +220,19 @@ Release Consistency Gate — v{version}
 
 Audit report: release-audit-{version}.md
   D10 Contract Parity score: {score}/100
+  D11 Deep-Chain Parity score: {score}/100
+  D11 critical findings: {N}  ← ANY critical blocks release per scoring.md rule 3
   D9 Leanness score: {score}/100
-  CRITICAL findings: {N}
+  CRITICAL findings (D1–D11): {N}
 
 Sync report: release-sync-{version}.md
   Phase A: {N} critical
   Phase B: {N} critical
-  Contract tier divergences: {N}
+  Contract tier divergences (A-C-*): {N}
+  Deep-chain tier divergences (A-D-*): {N} critical / {N} warning / {N} inconclusive
 ```
 
-**Decision rule:** defined canonically in `shared/scoring.md` §Release Gate Thresholds. Apply the 4-rule first-match precedence from that file verbatim. If `shared/scoring.md` thresholds change, the release gate behavior changes — do not duplicate the numbers here.
+**Decision rule:** defined canonically in `shared/scoring.md` §Release Gate Thresholds. Apply the 5-rule first-match precedence from that file verbatim (note: rule 3 is a hard block on any D11 critical regardless of score). If `shared/scoring.md` thresholds change, the release gate behavior changes — do not duplicate the numbers here.
 
 **When BLOCKED** (normal run), display the top 5 findings by severity (cite the finding IDs from the saved reports) and use `AskUserQuestion`:
 - "Run /code-forge:fix --review on the audit + sync reports" — delegates fix-up; after fixes complete, user re-invokes `/apcore-skills:release`

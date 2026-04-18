@@ -33,8 +33,8 @@ Run the ecosystem discovery from the shared ecosystem module:
 3. Extract versions from build config files
 4. Check git status for each repo
 5. **Surface consistency health** — use the canonical glob patterns from `skills/shared/ecosystem.md` §0.6a (single source of truth for report paths):
-   - Latest audit: newest mtime match of `{ecosystem_root}/audit-report-*.md` ∪ `{ecosystem_root}/release-audit-*.md`. Extract D9 Leanness and D10 Contract Parity scores from the Health Score section.
-   - Latest sync: newest match of `{ecosystem_root}/sync-report-*.md` ∪ `{ecosystem_root}/release-sync-*.md` — EXCLUDE `-phase-a-` / `-phase-b-` partials (prefer combined reports). Extract Phase A / Phase B FAIL counts and contract-tier divergences.
+   - Latest audit: newest mtime match of `{ecosystem_root}/audit-report-*.md` ∪ `{ecosystem_root}/release-audit-*.md`. Extract D9 Leanness, D10 Contract Parity, and D11 Deep-Chain Parity scores from the Health Score section.
+   - Latest sync: newest match of `{ecosystem_root}/sync-report-*.md` ∪ `{ecosystem_root}/release-sync-*.md` — EXCLUDE `-phase-a-` / `-phase-b-` partials (prefer combined reports). Extract Phase A / Phase B FAIL counts, contract-tier divergences (A-C-*), and deep-chain tier divergences (A-D-*).
    - Latest tester: newest match of `{ecosystem_root}/tester-report-*.md` ∪ `{ecosystem_root}/release-tester-*.md` ∪ `{ecosystem_root}/sdk-bootstrap-tester-*.md`. Extract conformance pass rate and divergent case count.
    - If no reports exist for a given signal, show `"— no recent report; run /apcore-skills:{audit|sync|tester} --save to populate"`.
 
@@ -64,13 +64,15 @@ Version Sync Check:
 
 Consistency Health (from latest reports):
   Last audit:     {date} — audit-report-{date}.md
-    Contract Parity (D10): {score}/100  {▓▓▓▓▓▓░░░░}
-    Leanness (D9):         {score}/100  {▓▓▓▓▓▓▓░░░}
-    CRITICAL findings:     {N}  (top: [{top-finding-id}] {one-line})
+    Contract Parity (D10):    {score}/100  {▓▓▓▓▓▓░░░░}
+    Deep-Chain Parity (D11):  {score}/100  {▓▓▓▓▓▓▓▓░░}
+    Leanness (D9):            {score}/100  {▓▓▓▓▓▓▓░░░}
+    CRITICAL findings:        {N}  (top: [{top-finding-id}] {one-line})
   Last sync:      {date} — sync-report-{date}.md
     Phase A FAIL:          {N}
     Phase B FAIL:          {N}
-    Contract-tier divergences: {N}
+    Contract-tier divergences (A-C-*):    {N}
+    Deep-chain-tier divergences (A-D-*):  {N} critical / {N} warning / {N} inconclusive
   Last tester:    {date} — tester-{date}.md
     Conformance cases:    {pass}/{total} PASS
     Cross-language divergences: {N}
@@ -79,7 +81,7 @@ Consistency Health (from latest reports):
 
 Commands:
 
-  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--save]
+  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--save]
       Cross-language API + contract + documentation consistency check & fix
 
   /apcore-skills:sdk <language> [--type core|mcp] [--ref <existing-sdk>]
@@ -88,7 +90,7 @@ Commands:
   /apcore-skills:integration <framework> [--lang python|typescript|go] [--ref <existing-integration>]
       Bootstrap new framework integration
 
-  /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--save report.md]
+  /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--no-deep-chain] [--save report.md]
       Deep cross-repo consistency audit
 
   /apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|contract|conformance|all] [--save report.md]

@@ -9,10 +9,10 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
-| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--save]` | Cross-language API + **contract/intent** + documentation consistency check & fix |
+| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
-| `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--save report.md]` | Deep cross-repo consistency audit — 10 dimensions including **D10 Contract Parity** (intent/logic). Emits review-compatible output consumable by `/code-forge:fix --review`. |
+| `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--no-deep-chain] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
 | `/apcore-skills:tester` | `[<repos...>] [--spec <feature>] [--mode generate\|run\|full] [--category unit\|integration\|boundary\|protocol\|contract\|conformance\|all] [--save report.md]` | Spec-driven test generation & cross-language behavioral verification (incl. Contract-derived tests and shared conformance fixtures) |
 | `/apcore-skills:release` | `<version> [--scope core\|mcp\|integrations\|all] [--dry-run]` | Coordinated multi-repo release pipeline |
 
@@ -76,7 +76,8 @@ The ecosystem enforces consistency at three distinct layers — each layer has a
 | Layer | What must be identical | What may differ | Enforced by |
 |---|---|---|---|
 | **L1 Implementation** | — nothing required — | Helper names, function decomposition, control-flow shape, line count, idiom usage | *Not enforced.* Each language follows its own grain. |
-| **L2 Intent / Contract** | Inputs validation rules, errors raised (and codes), side-effect order, return shape, behavioral properties (async, thread_safe, pure, idempotent, reentrant) | Implementation details, helper structure | **sync Step 4B** (contract tier — default on) + **audit D10** (Contract Parity) |
+| **L2 Intent / Contract (SHAPE)** | Inputs validation rules, errors raised (and codes), side-effect order, return shape, behavioral properties (async, thread_safe, pure, idempotent, reentrant) | Implementation details, helper structure | **sync Step 4B** (contract tier — default on) + **audit D10** (Contract Parity) |
+| **L2.5 Intent / Call-Chain (CHAIN)** | Which internal calls each public method makes, in what order, producing which state mutations. Catches "signatures match + declared contract matches, but internal call graph diverges" — e.g., one language's public method silently skips a validation call peers perform, or lacks a null-guard peers have | Helper decomposition, exact control-flow shape | **sync Step 4C** (deep-chain — default on) + **audit D11** (Deep-Chain Parity) |
 | **L3 Public Signature** | Class/function names (with language convention), parameter names/types, return types, trait/interface contracts, multi-constructor coverage | Internal type choices, private helpers | **sync Step 4** (Phase A checklist) + **audit D1** (API Surface) |
 
 Feature specs in doc repos (`apcore/`, `apcore-mcp/`) declare L2 contracts in `## Contract: ClassName.method` blocks. See `skills/shared/contract-spec.md` for the authoritative format. audit D4 flags any public symbol whose feature spec lacks a Contract block.

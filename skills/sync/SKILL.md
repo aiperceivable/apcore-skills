@@ -60,6 +60,8 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | "Same public signature means same intent" | NO. Two `register(id, module)` methods can share the same signature yet diverge in logic — one validates before mutating, another writes first and rolls back on error; one raises on duplicate, another silently overwrites; one is thread-safe, another races. These are intent-level bugs. The CONTRACT tier compares inputs validation rules, errors raised, side-effect order, return shape, and behavioral properties (async/thread-safe/pure/idempotent/reentrant) against the spec's `## Contract:` block — or cross-repo when spec is silent. |
 | "Trait satisfaction is a Rust thing, skip it for other languages" | Every language has an equivalent: Python `__str__` / TS `toString()` / Go `String()` / Rust `impl Display`. The protocol spec defines required interface contracts; each language must satisfy them with its idiomatic mechanism. Build a dedicated checklist row. |
 | "Multiple constructors are language-specific sugar" | Rust's `Self::new()` / `Self::with_config()` / `Self::from_env()` corresponds to Python `classmethod` factories, TS static factories, Go `NewX` / `NewXFromY`. If the spec defines multiple construction paths, every language must expose all of them. Treat constructors as a list, not a single entry. |
+| "Contract extraction (4B) already catches intent divergence, deep-chain is redundant" | NO. 4B's sub-agent is **one-per-repo doing shape extraction** — it lists `inputs/errors/side_effects` as declared fields. It cannot see bugs that only appear when you read the code: bare dict subscripts that throw `KeyError` on malformed input, internal methods that silently skip validation, functions that fail to update a map the peer language updates. These are visible in the AST, not in the contract shape. Step 4C reads all N languages' source for one module **side-by-side** and diffs the call graphs — that is how the `_discover_custom` / `discover_internal` / `for...of null` class of bugs get caught. |
+| "A sub-agent that reports 'no issues' means the module is fine" | NO. A polished 'all clear' report is the most dangerous output — it manufactures false confidence. Sub-agents MUST default to `inconclusive` when evidence is ambiguous and MUST cite `file:line:snippet` for every finding, including "no issue" claims. The orchestrator rejects any module report without per-symbol evidence citations and re-runs the sub-agent. |
 
 ## When to Use
 
@@ -73,7 +75,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--save]
 ```
 
 | Argument / Flag | Default | Description |
@@ -84,6 +86,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | `--scope` | **cwd** | Which group: `core`, `mcp`, `all`. **If omitted and no positional repos, defaults to the current working directory's repo only.** Use `--scope all` to scan all repos. |
 | `--lang` | all discovered | Comma-separated list of languages to compare |
 | `--internal-check` | `contract` | Internal consistency tier. `none` = public API only. `contract` = **DEFAULT** — also compare behavioral contracts (inputs validation, errors raised, side-effect order, return shape, properties) via Step 4B, static. `skeleton` = contract + algorithm checkpoint sequences (Step 4A, static, requires source instrumentation). `behavior` = all static tiers + hand off to `tester` skill for runtime behavioral equivalence (Step 7.5, dynamic). Higher tiers include lower tiers. Function-level (helper) identity is intentionally NOT supported — see Anti-Rationalization Table. |
+| `--deep-chain` | `on` | Cross-language deep-chain analysis (Step 4C). When on, the orchestrator spawns one sub-agent **per logical module** and feeds it all N languages' source side-by-side. The sub-agent diffs call graphs, finds missing-validation / missing-registration / defensive-gap divergences that shape-level extraction (4B) cannot see. Forced off when `--internal-check=none`. Set `--deep-chain off` for fast sync (reduces sub-agent count, loses intent-level chain coverage). |
 | `--save` | off | Save report to file |
 
 ### Internal Consistency Tiers
@@ -98,6 +101,8 @@ Each tier is **cumulative** — higher tiers include all lower tiers.
 | `behavior` | All static tiers + runtime behavioral equivalence — same input → same observable output across all SDKs | Dynamic — invokes `/apcore-skills:tester --mode run --category protocol` (Step 7.5) and merges results | High — runs tests |
 
 **Contract tier is the default** because it answers the question "do all SDKs agree on what the method DOES?" without requiring any source instrumentation or test execution. It captures intent (logic/purpose) divergence that pure signature comparison misses. See `shared/contract-spec.md` for the `## Contract:` block format.
+
+**Deep-chain analysis (Step 4C, `--deep-chain on` by default) runs alongside every non-`none` tier.** It is **not** a `--internal-check` tier because it operates on a different axis: instead of comparing extracted **shape** (as contract/skeleton/behavior do), it compares actual **call graphs across languages**. A sub-agent reads all N languages' source for one module side-by-side and diffs the code directly. This catches bugs that shape extraction is structurally blind to (e.g., `for (const entry of customModules)` crashing on `null` when peer languages don't; internal methods skipping validation; maps missing an insert). See Step 4C.
 
 **Function-level identity (helper names / count / decomposition) is explicitly NOT a tier.** It conflicts with each language's design philosophy (Rust ownership splits, Go's no-default-args, Python list comprehensions) and produces noise rather than signal.
 
@@ -144,19 +149,25 @@ Implementation repos contain only code and a README. They do NOT contain PRD/SRS
 
 ## Context Management
 
-**All per-repo operations use parallel sub-agents.** The main context ONLY handles:
-1. Orchestration — determining scope, phase, and spawning sub-agents
+**All per-repo AND per-module operations use parallel sub-agents.** The main context ONLY handles:
+1. Orchestration — determining scope, phase, enumerating modules, tracking per-module progress, spawning sub-agents
 2. Spec reference — reading the documentation repo (lightweight, structured docs)
 3. Comparison logic — building and evaluating the checklist from structured summaries
 4. Phase sequencing — Phase A must complete before Phase B begins
 5. Reporting — formatting combined results
 
-Phase A Step 2 spawns **one sub-agent per implementation repo, all simultaneously** for API extraction. Phase B Step 6 spawns **one sub-agent per documentation repo + one per implementation repo, all simultaneously** for documentation auditing. Fix steps spawn **one sub-agent per repo** for applying corrections.
+Parallelism fan-out:
+- **Step 2** — one sub-agent per implementation repo (per-repo, simultaneous) for public API extraction
+- **Step 4C** — one sub-agent per **logical module** (cross-language — each sub-agent reads all N languages' source for its module), dispatched in batches by the orchestrator with bounded concurrency. Progress table is maintained in main context
+- **Step 6** — one sub-agent per documentation repo + one per implementation repo (simultaneous) for documentation auditing
+- **Step 10** — one sub-agent per repo with fixable findings (simultaneous)
+
+**Orchestrator progress tracking (Step 4C).** The main context keeps a table `module_progress[module] = {status: pending|in_progress|complete|failed|inconclusive, findings_count, inconclusive_count, assigned_sub_agent_id}`. As each sub-agent returns, the orchestrator updates the row and prints one line: `[4C] {module}: {N} findings ({critical}/{warning}/{info}/{inconclusive})`. If any module comes back `failed` or entirely `inconclusive`, the orchestrator emits a visible warning — a module that cannot be analyzed is itself a risk indicator, not a quiet success.
 
 ## Workflow
 
 ```
-Step 0 (ecosystem) → Step 1 (parse args) → PHASE A [Steps 2-5] → PHASE B [Steps 6-8] → Step 9 (combined report + review-compatible output) → [Step 10 (fix)]
+Step 0 (ecosystem) → Step 1 (parse args) → PHASE A [Steps 2-5, including 4A/4B/4C] → PHASE B [Steps 6-8] → Step 9 (combined report + review-compatible output) → [Step 10 (fix)]
 ```
 
 ---
@@ -302,10 +313,11 @@ If a feature spec has no `## Algorithm` section for a given method, Step 4A skip
 
 Build an explicit per-symbol checklist and evaluate every single item. No shortcuts.
 
-Step 4 has three substeps that run in order:
+Step 4 has four substeps that run in order:
 - **4.1–4.3** — signature / type / naming checklist (always runs)
 - **4A** — skeleton checkpoint comparison (runs only when `--internal-check` is `skeleton` or `behavior`)
 - **4B** — contract parity (runs by default — `--internal-check` is `contract`, `skeleton`, or `behavior`)
+- **4C** — cross-language deep-chain analysis (runs when `--deep-chain=on` AND `--internal-check != none`; default is on)
 
 #### 4.1 Build the Master Checklist
 
@@ -542,12 +554,103 @@ This keeps `location` as a single string (compatible with `/code-forge:fix --rev
 
 ---
 
+#### 4C: Cross-Language Deep-Chain Analysis (DEFAULT ON — unless --deep-chain=off or --internal-check=none)
+
+**Purpose.** The preceding substeps (4, 4A, 4B) all compare **extracted shapes** — signatures, checkpoint lists, contract tuples. Shape extraction is structurally blind to a class of bugs where the shape matches across languages but the **actual code inside the method** diverges:
+
+- One language's public method silently omits an internal validation call that peer languages perform
+- One language's iteration-over-external-input lacks a null guard that peer languages have
+- One language's method updates only some of the maps/events that peer languages update
+- One language's subscript/indexing path throws on malformed input where peer languages recover
+
+Step 4C fills this gap by dispatching **one sub-agent per logical module** that reads all N languages' source for that module **side-by-side** and diffs the call graphs directly.
+
+**Scope and boundary.** Step 4C does NOT perform a full single-repo code review — that is `code-forge:review`'s job. Step 4C is ONLY a **cross-language call-chain diff**: it reports divergences between languages for the same public method. Shared bugs (all N languages have the same defensive gap) are out of scope — run `code-forge:review` per-repo to catch those.
+
+**Skip conditions:**
+- `--deep-chain=off` → skip entire substep with INFO finding `"deep-chain analysis disabled by flag"`
+- `--internal-check=none` → forced off, skip with INFO finding
+- Only 1 implementation repo in scope (no peer to diff against) → skip with INFO finding `"deep-chain requires ≥2 implementations, only {repo} in scope"`
+
+##### 4C.1 Enumerate Modules
+
+Derive the list of logical modules to analyze. Each module corresponds to one `## Feature:` block in the documentation repo (i.e., one file under `{doc_repo}/docs/features/*.md`). For each feature spec file:
+
+1. Parse the frontmatter / heading to extract the logical module name (e.g., `registry`, `executor`, `config`, `middleware`)
+2. From `api_summaries[repo_name]` (Step 2 output), locate the source file(s) in each impl repo that contain the symbols belonging to that module. The mapping is: module name → set of symbols → set of source files per language.
+3. Store as `modules_to_analyze = [{module_name, public_symbols, source_files_per_lang, spec_contract_block}]`
+
+If a feature spec has no corresponding symbols in ≥2 implementations, skip that module (already flagged by Step 4.3 as missing-implementation).
+
+##### 4C.2 Orchestrate Per-Module Sub-agents
+
+Initialize `module_progress[module_name] = {status: pending, findings_count: 0, inconclusive_count: 0}` for every module.
+
+Dispatch sub-agents in **batches of at most 5 simultaneously** (bounded concurrency — too many parallel sub-agents starve the orchestrator's tool budget). For each batch:
+
+1. Launch `Agent(subagent_type="general-purpose")` for each module in the batch, all in a single round of parallel Agent calls
+2. Each sub-agent uses the template from `@references/deep-chain-prompt.md`, with these variables filled:
+   - `{module_name}` — the logical module
+   - `{repos}` — list of implementation repo names
+   - `{source_files}` — map of `{lang: file_path}` for this module
+   - `{public_symbols}` — the list of public symbols (from Step 4.1 / `spec_api`) scoped to this module
+   - `{verified_api}` — the per-repo verified signature rows for this module (so the sub-agent does NOT re-verify signatures — that is Step 4's job)
+   - `{spec_contract}` — the `## Contract:` block from the feature spec if present; else empty
+3. Mark `module_progress[module_name].status = in_progress` and record the sub-agent's assigned id
+4. As each sub-agent returns:
+   - Parse the JSON payload in the final fenced code block
+   - Validate it has the required shape (`module`, `findings[]`, `graphs_available_for`, `analyzed_symbols`). If malformed, mark `status = failed`, print a visible warning, and do NOT retry silently — emit a CRITICAL finding `"deep-chain sub-agent for module {M} returned malformed output — manual review required"` so the failure surfaces in the report
+   - Assign sequential `finding_id` values `A-D-{seq}` to each finding
+   - Update `module_progress[module_name]` with the finding counts and set `status = complete` (or `inconclusive` if `inconclusive_count == findings.length` and `findings.length > 0`)
+   - Print one progress line: `[4C] {module}: {critical}/{warning}/{info}/{inconclusive} findings — {status}`
+5. When the batch completes, start the next batch until all modules have been dispatched
+
+Store the flat finding list as `phase_a_deep_chain_results = [finding1, finding2, ...]`.
+
+##### 4C.3 Severity Rules
+
+The sub-agent proposes severities; the orchestrator MAY downgrade based on global context but MUST NOT upgrade without re-verifying:
+
+- `critical` — keep as-is. These are cross-language divergences with concrete file:line:snippet citations showing one language does X and another skips it.
+- `warning` — keep as-is. Typically order-of-side-effects divergences or extra-validation-in-one-repo.
+- `info` — keep as-is.
+- `inconclusive` — emit to the report as-is. **Do NOT convert `inconclusive` to `info` or drop it.** An entire module returning mostly `inconclusive` is a signal that either (a) the sub-agent lacked context, or (b) the languages genuinely diverge in ways that need human judgment. Both cases require visibility.
+
+##### 4C.4 Anti-Pattern Guards
+
+- **No silent success.** A module reporting zero findings must have a non-empty `confidence_notes` field proving the sub-agent actually traced the call chains. If `confidence_notes` is empty AND `findings` is empty, the orchestrator emits a WARNING `"deep-chain module {M} returned empty report with no confidence trace — sub-agent may not have read the source"` and does NOT accept the clean result.
+- **No cross-module leakage.** If a sub-agent's finding cites files outside its assigned module's source set, drop that finding and emit WARNING `"deep-chain sub-agent leaked out of module scope — finding discarded"`.
+- **No shape-only findings.** Findings MUST cite `file:line` in the `evidence` block for every language involved. Shape-only findings (those that could have been produced by Step 4B) are discarded — Step 4B already runs; Step 4C is for depth, not redundancy.
+- **No shallow chains.** If the sub-agent's per-language graph for a public symbol contains `call: _private_helper(...)` leaves with no expansion beneath them AND the helper is defined in the same file / same repo / same module source set, the orchestrator rejects the report and re-invokes the sub-agent with an explicit reminder: *"Your graph for {symbol} left `_private_helper` unexpanded. Per `deep-chain-prompt.md` Rule 3b, same-file private helpers MUST be inlined — the bugs this step catches live inside those helpers. Re-run and inline the helper body."* Retry at most twice; after the second failure mark the module `failed` and surface as CRITICAL `[A-D-FATAL-{module}] deep-chain sub-agent could not produce expanded graphs — manual review required`. A sub-agent that repeatedly returns shallow chains is a dangerous signal (produces fluent but empty reports) and must be visible to the user, never accepted silently.
+
+##### 4C.5 Output Format
+
+For Step 5 and Step 9, each deep-chain finding renders as:
+
+```
+[{A-D-{seq}}] {severity} — {type}
+  Module: {module_name}
+  Symbol: {symbol}
+  Divergence: {divergence}
+  Evidence:
+    python:     {file}:{line} — {one-line snippet excerpt}
+    typescript: {file}:{line} — {one-line snippet excerpt}
+    rust:       {file}:{line} — {one-line snippet excerpt}
+  Recommendation: {recommendation}
+  Verification: static-inference
+```
+
+The `Verification: static-inference` line is MANDATORY on every deep-chain finding. It signals to downstream consumers (tester, fix) that this is a static conclusion — tester MAY re-verify at runtime when `--internal-check=behavior` is also active.
+
+---
+
 #### 4.4 Store Phase A Results
 
 Store the full evaluated checklist as `phase_a_results`:
 - `verified_api` — the spec-defined API surface with per-symbol verification status from implementations. Definition: the union of all symbols from the spec, annotated with which implementations have them and whether they match. For PASS symbols, the spec definition is confirmed correct. For FAIL symbols, the spec definition is still authoritative (implementations are wrong).
 - `checklist` — every item with its PASS/FAIL/WARN status
-- `findings` — structured list of all failures with severity
+- `findings` — structured list of all failures with severity. This list is the UNION of Steps 4.1–4.3 (namespace `A-`), 4A (namespace `A-S-`), 4B (namespace `A-C-`), and 4C (namespace `A-D-`). All four namespaces share the same finding schema (`finding_id`, `severity`, `symbol`, `location`, `fix_hint`), and Step 4C findings additionally carry `type`, `evidence.{lang}`, `verification: "static-inference"`
+- `module_progress` — per-module deep-chain orchestrator state (status + counts) from Step 4C, kept for the Phase A report and for the orchestrator to surface failed/inconclusive modules as visible warnings. Does NOT feed into Phase B directly.
 
 This `verified_api` becomes the input truth for Phase B. When injecting into Phase B sub-agent prompts, format as:
 ```
@@ -611,6 +714,18 @@ Internal skeleton (--internal-check >= skeleton):
   Methods with reordered checkpoints: {N}
   Methods with no instrumentation: {N}
 
+Cross-language deep-chain (--deep-chain=on — DEFAULT):
+  Modules analyzed: {N}
+  Modules complete: {N}  failed: {N}  inconclusive: {N}
+  Findings: critical {N} / warning {N} / info {N} / inconclusive {N}
+  Top finding types:
+    semantic-divergence:    {N}
+    missing-validation:     {N}
+    missing-registration:   {N}
+    defensive-gap:          {N}
+    error-path-divergence:  {N}
+    contract-gap:           {N}
+
 FAIL items (expanded):
   ❌ Registry.scan_directory()
      Present in: spec, apcore-python
@@ -621,6 +736,26 @@ FAIL items (expanded):
      Spec:       (module_id: str, input: dict, context: Context | None = None) -> ExecutionResult
      Python:     (module_id: str, input: dict, context: Context | None = None) -> ExecutionResult  ✓
      TypeScript: (moduleId: string, input: Record<string, unknown>) -> ExecutionResult  ✗ missing context param
+
+  ❌ [A-D-004] missing-registration — Registry.discover (module: registry)
+     Divergence: Rust discover_internal only inserts into descriptors/lowercase_map;
+                 Python _discover_custom and TS _discoverCustom both call register() which
+                 inserts into the modules map.
+     Evidence:
+       python:     apcore-python/src/apcore/registry/registry.py:276 — self.register(mod_id, mod)
+       typescript: apcore-typescript/src/registry/registry.ts:251 — this.register(moduleId, mod)
+       rust:       apcore-rust/src/registry/registry.rs:865 — (no modules.insert call)
+     Verification: static-inference
+
+  ⚠️ [A-D-007] defensive-gap — Registry._discoverCustom (module: registry)
+     Divergence: TS does not null-guard customModules; Python iterates via list comprehension
+                 which tolerates generator-returning discoverers; Rust's type system enforces
+                 a Vec.
+     Evidence:
+       python:     apcore-python/src/apcore/registry/registry.py:262 — for entry in (custom_modules or [])
+       typescript: apcore-typescript/src/registry/registry.ts:232 — for (const entry of customModules) // crashes on null
+       rust:       apcore-rust/src/registry/registry.rs:864 — discovered: Vec<DiscoveredModule> (typed)
+     Verification: static-inference
 ```
 
 If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-a-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
@@ -682,6 +817,10 @@ After collecting all per-repo findings, the main context performs cross-repo che
 **Skip if `--internal-check` is `none` or `skeleton`.** This step runs ONLY when the operator opts into the behavior tier.
 
 Sync alone cannot verify that two implementations produce the same outputs for the same inputs — that is the `tester` skill's job. When this tier is enabled, the main context invokes `tester` as a sub-step and merges its findings into Phase B.
+
+**Deep-chain findings carry a `verification: "static-inference"` field intended as a future runtime-verification hook.** Today, tester does NOT consume Step 4C findings — it runs its standard `--category protocol` suite built from feature-spec Contract blocks. When that suite incidentally exercises a code path that a deep-chain finding flagged (e.g., a protocol test that happens to pass a malformed discoverer result), any resulting divergence surfaces as a tester finding in its own right; operators correlate by `(module, symbol)` manually.
+
+**Roadmap (not implemented):** a future tester extension `--deep-chain-targets={sync-report-path}` would parse A-D-* findings and synthesize minimal inputs per finding, upgrading `verification` to `"runtime-verified"` when confirmed or `"static-inference-disputed"` when contradicted. The `static-inference` field is emitted today so that, when that extension lands, existing sync reports remain consumable without a format bump.
 
 **Invocation contract.**
 
@@ -795,6 +934,7 @@ Finding ID namespaces:
   A-{seq}     Phase A signature / type / naming findings (Step 4.1–4.3)
   A-S-{seq}   Phase A skeleton findings (Step 4A — only when --internal-check >= skeleton)
   A-C-{seq}   Phase A contract findings (Step 4B — default when --internal-check >= contract)
+  A-D-{seq}   Phase A deep-chain findings (Step 4C — default when --deep-chain=on)
   B-{seq}     Phase B documentation findings (Steps 6–8)
   All IDs are stable within a single run; regenerated per invocation.
 
@@ -820,6 +960,13 @@ Internal contract (--internal-check >= contract — DEFAULT):
 Internal skeleton (--internal-check >= skeleton):
   Methods checked: {N} | Pass: {N} | Missing checkpoint: {N} | Reordered: {N} | No instrumentation: {N}
   (omitted entirely if --internal-check=none or --internal-check=contract, or if no spec skeletons defined)
+
+Cross-language deep-chain (--deep-chain=on — DEFAULT):
+  Modules: {N} analyzed | {N} complete | {N} failed | {N} inconclusive
+  Findings: critical {N} | warning {N} | info {N} | inconclusive {N}
+  By type: semantic-divergence {N} | missing-validation {N} | missing-registration {N} |
+           defensive-gap {N} | error-path-divergence {N} | contract-gap {N}
+  (omitted entirely if --deep-chain=off or --internal-check=none or <2 implementations)
 
 ═══ PHASE B: Documentation Consistency ═══
 
@@ -865,7 +1012,11 @@ INFO:
   ...
 
 ═══ SUMMARY ═══
-  Phase A: {N} findings (critical: {n}, warning: {n}, info: {n})
+  Phase A: {N} findings (critical: {n}, warning: {n}, info: {n}, inconclusive: {n})
+    ├─ signature/type/naming (A-): {n}
+    ├─ contract (A-C-): {n}
+    ├─ skeleton (A-S-): {n}
+    └─ deep-chain (A-D-): {n}
   Phase B: {N} findings (critical: {n}, warning: {n}, info: {n})
   Total: {N} findings
   Contradictions (doc internal): {N}
@@ -901,10 +1052,30 @@ Use the `# Project Review:` header with a **dynamic scope description** (derived
 
 | Sync Severity | Review Severity | Condition |
 |---------------|-----------------|-----------|
-| critical | blocker | Missing API (symbol defined in spec but absent from implementation); missing trait/interface satisfaction; missing constructor variant |
-| critical | critical | Signature mismatch, type mismatch, spec chain contradiction; **contract validation/error/side-effect/return/property divergence** (Step 4B); **skeleton checkpoint missing or reordered** (Step 4A); **behavioral divergence** from tester (Step 7.5) |
-| warning | warning | Naming inconsistency, doc mismatch, missing README section; **spec silent on Contract (cross-repo-only mode)**; **contract property null vs true/false** (extraction limit); **skeleton has extra checkpoint not in spec**; **flaky behavior test** from tester |
+| critical | blocker | Missing API (symbol defined in spec but absent from implementation); missing trait/interface satisfaction; missing constructor variant; **deep-chain `missing-registration`** (Step 4C — one language's public method fails to update a map peers update, breaking later `get`/`list` calls) |
+| critical | critical | Signature mismatch, type mismatch, spec chain contradiction; **contract validation/error/side-effect/return/property divergence** (Step 4B); **skeleton checkpoint missing or reordered** (Step 4A); **behavioral divergence** from tester (Step 7.5); **deep-chain `semantic-divergence` / `missing-validation` / `defensive-gap` / `error-path-divergence` / `contract-gap`** (Step 4C) |
+| warning | warning | Naming inconsistency, doc mismatch, missing README section; **spec silent on Contract (cross-repo-only mode)**; **contract property null vs true/false** (extraction limit); **skeleton has extra checkpoint not in spec**; **flaky behavior test** from tester; **deep-chain order-only divergence** (Step 4C — same mutations, different order) |
+| inconclusive | warning | **deep-chain `inconclusive` findings** (Step 4C) surface as review warnings with title prefix `[inconclusive]` and suggestion `"manual review required — static analysis could not determine whether divergence is intentional"`. Never silently dropped. |
 | info | _(skip)_ | Not included — info-level findings are not actionable bugs |
+
+**Deep-chain finding rendering.** Because a deep-chain finding cites multiple languages' evidence in a single logical divergence, emit **one review issue per non-reference language** (the "reference language" is the one whose behavior matches the spec Contract, or the majority if spec is silent). Each issue's `file` points at the offending language's source. Include the peer evidence in `description` so the fix agent sees the full picture:
+
+```markdown
+- severity: critical
+  file: apcore-rust/src/registry/registry.rs
+  line: 865
+  title: [A-D-004] missing-registration — Registry.discover_internal skips modules map insert
+  description: |
+    Python (apcore-python/src/apcore/registry/registry.py:276) and TypeScript (apcore-typescript/src/registry/registry.ts:251) both call
+    `register(module_id, module)` which inserts into the `modules` map. Rust `discover_internal`
+    only inserts into `descriptors` and `lowercase_map`, never into `modules`. Subsequent `get(name)`
+    will return None for discovered modules.
+    Verification: static-inference.
+  suggestion: |
+    Inside the for-loop at registry.rs:867, after building the descriptor, call the internal
+    registration path that updates core.modules (mirroring how Python's _discover_custom ends in
+    self.register(mod_id, mod)). Do not add a new method — use the existing internal register path.
+```
 
 **Rules:**
 - Group issues by file for efficient batch fixing

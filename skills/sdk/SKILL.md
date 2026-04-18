@@ -25,7 +25,7 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 ## Iron Law
 
-**EVERY NEW PROJECT MUST IMPLEMENT THE FULL API CONTRACT AND PASS THE POST-IMPL CONSISTENCY GATE (Step 9.5). No partial implementations — if you ship it, it must cover all exported symbols from the reference implementation, agree with the reference on Contract (inputs / errors / side effects / properties), and pass shared conformance fixtures. "code-forge:impl finished" is NOT the completion bar — "Step 9.5 gate passed" is.**
+**EVERY NEW PROJECT MUST IMPLEMENT THE FULL API CONTRACT AND PASS THE POST-IMPL CONSISTENCY GATE (Step 9.5). No partial implementations — if you ship it, it must cover all exported symbols from the reference implementation, agree with the reference on Contract (inputs / errors / side effects / properties) AT BOTH the shape level (Contract tuples) AND the chain level (cross-language source diff), and pass shared conformance fixtures. "code-forge:impl finished" is NOT the completion bar — "Step 9.5 gate passed" is.**
 
 ## Anti-Rationalization Table
 
@@ -36,6 +36,8 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 | "Tests can come later" | TDD is mandatory. Test infrastructure is set up in scaffolding. |
 | "I'll figure out the naming as I go" | Naming is defined by conventions.md. Apply language rules from day one. |
 | "Examples can be added after the API works" | Examples are ported from the reference implementation during scaffolding. Users need runnable code from day one. |
+| "Step 9.5 passed with Contract tier — that's enough" | NO. Contract tier extracts declared shapes and diffs shapes. A just-bootstrapped SDK can pass Contract tier while having internal divergences that Contract extraction cannot see (internal method silently skips a validation call the reference performs; iteration path lacks a null-guard the reference has; public method fails to update a map the reference updates). Step 9.5.1 MUST run `--deep-chain=on` and Step 9.5.3 MUST treat any A-D-* finding — including `inconclusive` — as a FAIL. Passing the shape check while the chain diverges means the SDK ships with latent bugs. |
+| "The code-forge:port plan said it would implement X, so it did" | Do not trust the plan's claim. Verify X exists, is wired through the public API, and is called from the same path the reference calls it from. Step 9.5's deep-chain check is what catches "the plan said it implemented validate_module_id, but it was only added to the impl file and never called from discover_internal". |
 
 ## When to Use
 
@@ -298,17 +300,19 @@ Once `code-forge:impl` has finished all planned features, run the full consisten
 #### 9.5.1 Sync vs Reference
 
 ```
-/apcore-skills:sync {target-repo-name},{ref-repo-name} --phase all --internal-check=contract --save {ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md
+/apcore-skills:sync {target-repo-name},{ref-repo-name} --phase all --internal-check=contract --deep-chain=on --save {ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md
 ```
 
 This compares the new SDK against the reference for:
-- Public API signatures (Phase A)
-- Behavioral contracts (Step 4B — inputs validation, errors, side effects, return shape, properties)
+- Public API signatures (Phase A Steps 4.1–4.3)
+- Behavioral contracts — SHAPE-LEVEL (Step 4B: inputs validation tuples, errors, side effects, return shape, properties)
+- **Call graphs — CHAIN-LEVEL (Step 4C: cross-language source diff per module — catches bugs that shape extraction is blind to, like internal methods skipping validation, defensive gaps on null/malformed inputs, missing map-inserts)**
 - Documentation (Phase B)
 
 Parse the saved report for:
 - CRITICAL findings count
-- Contract-tier divergence count
+- Contract-tier divergence count (A-C-* namespace)
+- **Deep-chain divergence count (A-D-* namespace)**
 
 #### 9.5.2 Tester Run
 
@@ -326,14 +330,21 @@ Parse the saved report for:
 
 #### 9.5.3 Gate Decision
 
-**Rule:** PASS if and only if **all three** of the following are zero:
-- `sync_critical` — CRITICAL findings from `/apcore-skills:sync` (Phase A + Phase B + contract tier)
-- `contract_divergences` — sync Step 4B / audit D10 findings (counted from the sync report's Contract tier section)
+**Rule:** PASS if and only if **all four** of the following are zero:
+- `sync_critical` — CRITICAL findings from `/apcore-skills:sync` (Phase A + Phase B + contract tier + deep-chain tier)
+- `contract_divergences` — sync Step 4B / audit D10 findings (counted from the sync report's Contract tier section, A-C-* namespace)
+- **`deep_chain_divergences` — sync Step 4C / audit D11 findings (counted from the sync report's Deep-Chain Parity section, A-D-* namespace). Any critical OR warning OR inconclusive finding counts. Info findings do not count.**
 - `fixture_divergences` — cross-language conformance matrix mismatches from tester (Matrix B in tester Step 4)
 
-If any of the three is greater than zero → **FAIL**. Present the highest-severity findings first.
+If any of the four is greater than zero → **FAIL**. Present the highest-severity findings first.
 
-Rationale: all three counts measure distinct failure modes (signature mismatch, intent mismatch, behavioral mismatch). None of them is acceptable in a just-bootstrapped SDK; tolerating one silently defeats the post-impl gate's purpose.
+Rationale: all four counts measure distinct failure modes:
+- **signature mismatch** (shape) — Phase A Steps 4.1–4.3
+- **intent mismatch, shape-level** — Phase A Step 4B (declared contract tuples diverge)
+- **intent mismatch, chain-level** — Phase A Step 4C (actual source code diverges in ways the Contract block does not capture; this is the failure mode that blind-spots shape-level checks)
+- **behavioral mismatch** — tester runtime
+
+None of them is acceptable in a just-bootstrapped SDK; tolerating one silently defeats the post-impl gate's purpose. **Chain-level `inconclusive` counts because a just-bootstrapped SDK should leave zero uncertainty** — if the deep-chain sub-agent could not determine whether the new SDK matches the reference, the operator must resolve the uncertainty before shipping.
 
 On FAIL, display the top findings and use `AskUserQuestion`:
 - "Run /code-forge:fix --review" — consumes the sync + tester review-compatible outputs and auto-patches

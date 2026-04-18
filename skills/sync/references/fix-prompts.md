@@ -64,6 +64,15 @@ PHASE B FIXES (docs, examples, tests):
 13. BEHAVIORAL DIVERGENCE — **MANUAL REVIEW ONLY, do NOT auto-fix.**
     - Add tester divergence findings to MANUAL_REVIEW_ITEMS with the failing input/output diff. Behavioral fixes require understanding spec intent, not pattern matching.
 
+14. DEEP-CHAIN FINDINGS (A-D-* namespace) — **MANUAL REVIEW ONLY, do NOT auto-fix.**
+    - Deep-chain findings describe cross-language divergences in call-graph behavior (missing validation, missing registration, defensive gaps, error-path divergences). Fixing them correctly requires porting logic semantics between languages, which pattern-matching auto-fix cannot do safely.
+    - Add every A-D-* finding to MANUAL_REVIEW_ITEMS with:
+      - The finding summary
+      - The evidence block (all languages' file:line:snippet)
+      - The sub-agent's `recommendation` field verbatim
+    - Do NOT modify source for these findings. Report them to the operator for human-written fixes.
+    - Exception: if the finding is `inconclusive` severity, include it in MANUAL_REVIEW_ITEMS but prefix with `[inconclusive]` so the operator knows the original sub-agent itself flagged uncertainty.
+
 After all fixes:
 1. List all files modified with a summary of changes
 2. Do NOT commit — leave changes for user review
@@ -74,10 +83,11 @@ Return:
 REPO: {repo-name}
 PHASE_A_FIXES: {count} (naming: {n}, stubs: {n}, traits: {n}, constructors: {n}, checkpoints: {n})
 PHASE_B_FIXES: {count} (readme: {n}, api-refs: {n}, examples: {n}, tests: {n}, contradictions: {n})
+DEEP_CHAIN_DEFERRED: {count} — all A-D-* findings are manual-review-only, reported in MANUAL_REVIEW_ITEMS
 TEST_RESULT: {pass|fail|skipped}
 TEST_COUNTS: {passed}/{total}
 REVERTED_FIXES: {list or "none"}
-MANUAL_REVIEW_ITEMS: {list — checkpoint reorderings, behavioral divergences, ambiguous trait stubs}
+MANUAL_REVIEW_ITEMS: {list — checkpoint reorderings, behavioral divergences, ambiguous trait stubs, deep-chain findings with evidence and recommendation}
 FILES_MODIFIED: {list}
 
 ---

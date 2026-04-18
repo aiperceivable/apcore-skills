@@ -37,18 +37,19 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 ## Command Format
 
 ```
-/apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--save report.md]
+/apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--no-deep-chain] [--save report.md]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--scope` | **cwd** | Which repo group to audit. **If omitted, defaults to the current working directory's repo only.** Use `--scope all` for full ecosystem audit. |
 | `--fix` | off | Auto-fix issues where safe |
+| `--no-deep-chain` | off (D11 runs by default) | Skip D11 (cross-language deep-chain analysis). Use for fast audits where you only need D1–D10 shape-level checks. D11 adds one sub-agent per logical module; disabling saves time on large module sets. |
 | `--save` | off | Save report to file |
 
 ## Audit Dimensions
 
-The audit covers 10 dimensions, each checking specific aspects:
+The audit covers 11 dimensions, each checking specific aspects:
 
 | # | Dimension | Severity Range | Description |
 |---|---|---|---|
@@ -61,7 +62,10 @@ The audit covers 10 dimensions, each checking specific aspects:
 | D7 | Configuration | warning-info | APCORE_* settings consistency across integrations |
 | D8 | Project Structure | warning-info | File/directory layout per conventions |
 | D9 | **Bloat & Redundancy** | **critical-info** | **Dead exports, duplicate symbols, parallel implementations, LOC growth, unused config, scope creep** |
-| D10 | **Contract Parity (Intent)** | **critical-warning** | **Behavioral contract parity — inputs validation, errors raised, side-effect order, return shape, async/thread-safe/pure/idempotent/reentrant properties — catches "same signature, different logic" bugs. Plus: integration consumer-contract check (does this integration USE the core SDK per its current Contract?).** |
+| D10 | **Contract Parity (Intent — SHAPE-LEVEL)** | **critical-warning** | **Behavioral contract parity — inputs validation, errors raised, side-effect order, return shape, async/thread-safe/pure/idempotent/reentrant properties — catches "same signature, different logic" bugs at the Contract tuple level. Plus: integration consumer-contract check (does this integration USE the core SDK per its current Contract?).** |
+| D11 | **Deep-Chain Parity (Intent — CHAIN-LEVEL)** | **critical-inconclusive** | **Cross-language call-graph diff per logical module. Reads all N language implementations' source for the same module side-by-side and finds divergences that shape-level Contract comparison (D10) cannot see: bare-subscript / null-guard gaps, internal methods skipping validation that peers call, missing-registration into maps. Delegates to sync Step 4C — audit surfaces the findings as D11-{seq} entries. Runs when ≥2 same-type repos are in scope.** |
+
+**D10 vs D11 — why both.** D10 extracts a shape (inputs/errors/side_effects tuples) from each repo and diffs the shapes. D11 reads the actual source code across languages and diffs call graphs. They are **complementary, not redundant** — D10 catches divergences visible in the declared contract; D11 catches divergences that only appear when you read the code. A bug where one language's public method silently skips an internal validation call its peers perform will pass D10 (the declared contract matches) but fail D11 (the call graph shows the skip). Both run by default; disabling either is opt-out.
 
 ## Severity Levels
 
@@ -78,7 +82,7 @@ The audit covers 10 dimensions, each checking specific aspects:
 2. Aggregation — collecting structured findings from all sub-agents
 3. Reporting — formatting and displaying the consolidated report
 
-Step 2 spawns **up to 10 parallel sub-agents** (one per dimension, all simultaneously). Step 4 spawns **one parallel sub-agent per repo** for fixes. The main context never reads repo files directly.
+Step 2 spawns **up to 11 parallel sub-agents** (one per dimension, all simultaneously) — D1–D10 run as parallel dimension sub-agents; **D11 delegates to `sync` Step 4C** (which itself spawns one sub-agent per logical module under its own orchestrator). D11's progress updates surface in the audit orchestrator's log just like any other dimension. Step 4 spawns **one parallel sub-agent per repo** for fixes. The main context never reads repo files directly.
 
 ## Workflow
 
@@ -117,10 +121,10 @@ Parse `$ARGUMENTS` for flags.
 
 | Scope | Repos | Dimensions |
 |---|---|---|
-| `core` | Core SDKs + `apcore/` doc repo | D1-D3, D5-D6, D8-D10 (D4 covers `apcore/` only) |
-| `mcp` | MCP bridges + `apcore-mcp/` doc repo | D1-D3, D5-D6, D8-D10 (D4 covers `apcore-mcp/` only) |
-| `integrations` | Framework integrations + auto-pulled core SDKs (per-integration language) + `apcore/` doc repo as read-only peers | D2-D9 on integration repos; **D10 Consumer Contract Check** verifies each integration uses its matching core SDK per the core SDK's current Contract |
-| `all` | All repos | All dimensions |
+| `core` | Core SDKs + `apcore/` doc repo | D1-D3, D5-D6, D8-D11 (D4 covers `apcore/` only) |
+| `mcp` | MCP bridges + `apcore-mcp/` doc repo | D1-D3, D5-D6, D8-D11 (D4 covers `apcore-mcp/` only) |
+| `integrations` | Framework integrations + auto-pulled core SDKs (per-integration language) + `apcore/` doc repo as read-only peers | D2-D9 on integration repos; **D10 Consumer Contract Check** verifies each integration uses its matching core SDK per the core SDK's current Contract. **D11 skipped** (integrations are single-language; no cross-language chain to diff). |
+| `all` | All repos | All dimensions including D11 on core + mcp groups |
 
 **D9 (Bloat & Redundancy) is always included.** It applies to every scope and every repo type — it is the apcore ecosystem's primary defense against the additive bias of skill-driven feature work.
 
@@ -129,6 +133,11 @@ Parse `$ARGUMENTS` for flags.
 2. **Consumer Contract mode** — runs whenever at least one `integration` repo is in scope. The audit auto-pulls the matching core SDK (by language) and the `apcore/` doc repo as read-only peers, then verifies each integration uses the core SDK per its current Contract (input completeness, error handling, thread-safety assumption, deprecated API usage). See `references/dimension-prompts.md` D10 Step 4.
 
 Both modes can run in the same audit invocation — a `--scope all` run exercises both. When the current scope has only 1 same-type repo AND no integrations, D10 is skipped with an INFO finding.
+
+**D11 (Deep-Chain Parity) trigger rule.** Runs whenever ≥2 same-type impl repos are in scope AND D10's Parity mode is active (they share the "need peers to compare against" precondition). Skipped with INFO when:
+- Only 1 impl repo in scope (no peer)
+- Scope is `integrations` only (single-language chain analysis is code-forge:review's job)
+- User passes `--no-deep-chain` (escape hatch for fast audits)
 
 Display:
 ```
@@ -141,9 +150,47 @@ Dimensions: {list}
 
 ### Step 2: Execute Audit Dimensions (Sub-agents)
 
-Spawn **all dimension sub-agents in parallel (up to 10 simultaneously)**. Each sub-agent audits exactly 1 dimension. All dimensions are fully independent — no batching or serialization needed.
+Spawn **all dimension sub-agents in parallel**. Dimensions D1–D10 each run as one parallel sub-agent (up to 10 simultaneously). **D11 runs as a delegated invocation of `sync` Step 4C** (see Step 2.D11 below) — the delegation itself is one sub-agent from the audit orchestrator's POV, which internally fans out to module-level sub-agents. All dimensions are fully independent.
 
 **Sub-agent prompts:** Use the dimension-specific prompt templates from `@references/dimension-prompts.md`. Each dimension (D1–D10) has its own section with the full prompt template. Fill in `{repo_paths}` (and `{integration_repo_paths}` for D7, `{doc_repo_path}` for D10) from the scope determined in Step 1.
+
+#### Step 2.D11: Deep-Chain Parity (delegates to sync Step 4C)
+
+**Skip conditions** (all three must be false for D11 to run):
+- `--no-deep-chain` flag present
+- <2 impl repos in scope (after `--scope` resolution) OR scope is `integrations`-only
+- D10 Parity mode was skipped (same precondition)
+
+**Invocation.** Spawn a single `Agent(subagent_type="general-purpose")` tasked with running sync Step 4C internally. The prompt is:
+
+```
+Run /apcore-skills:sync {impl_repo_1},{impl_repo_2},...,{doc_repo} --phase a --internal-check=contract --deep-chain=on --save {ecosystem_root}/audit-d11-{YYYY-MM-DD}.md
+
+Do NOT execute Phase B. Do NOT execute tester. Only Phase A is required, and within Phase A only Step 4C findings are needed — the rest (4.1–4.3, 4A, 4B) may run but will be discarded.
+
+Return the parsed Step 4C findings in this exact format:
+
+D11_MODULES_ANALYZED: {N}
+D11_MODULES_FAILED: {N}
+D11_MODULES_INCONCLUSIVE: {N}
+D11_FINDINGS:
+  - finding_id: A-D-{seq}
+    severity: critical|warning|info|inconclusive
+    type: semantic-divergence|missing-validation|missing-registration|defensive-gap|error-path-divergence|contract-gap|inconclusive
+    module: {module_name}
+    symbol: {ClassName.method_name}
+    summary: {one-line}
+    evidence: { {lang}: { file, line, snippet } }
+    recommendation: {text}
+    verification: static-inference
+```
+
+**Result merging.** Renumber the incoming `A-D-{seq}` ids as `D11-{seq}` to fit audit's dimension-id namespace. Preserve `verification: static-inference` on every merged finding. The full deep-chain details remain in `{audit-d11-{date}.md}` — audit's Step 3 report only shows the summary block (see §D11 SUMMARY in Step 3 report template).
+
+**Failure modes.**
+- If the delegated sync invocation fails entirely → emit one CRITICAL finding `[D11-FATAL] sync Step 4C delegation failed — manual run required` and include the sync invocation's error output in the report. Do NOT pretend D11 passed.
+- If sync returns ≥1 `module_failed` or `module_inconclusive` → emit those modules as CRITICAL `[D11-{seq}]` findings with the reason. A module the skill could not analyze is itself a signal.
+- If sync returns zero findings AND zero `module_failed` AND `confidence_notes` is empty → audit treats this as suspicious and emits a WARNING `[D11-SUSPECT] deep-chain returned clean but without trace evidence — re-run with higher verbosity`.
 
 ---
 
@@ -160,19 +207,20 @@ Repos audited: {count}
 
 ═══ SUMMARY ═══
 
-  Dimension              | Critical | Warning | Info
-  D1 API Surface         |    2     |    3    |   1
-  D2 Naming Conventions  |    0     |    5    |   3
-  D3 Version Sync        |    1     |    0    |   0
-  D4 Documentation       |    0     |    2    |   4
-  D5 Test Coverage       |    0     |    1    |   2
-  D6 Dependencies        |    1     |    2    |   0
-  D7 Configuration       |    0     |    3    |   1
-  D8 Project Structure   |    0     |    1    |   2
-  D9 Bloat & Redundancy  |    1     |    8    |   5
-  D10 Contract Parity    |    3     |    4    |   2
-  ─────────────────────────────────────────────────
-  TOTAL                  |    8     |   29    |  20
+  Dimension              | Critical | Warning | Info | Inconclusive
+  D1 API Surface         |    2     |    3    |   1  |      —
+  D2 Naming Conventions  |    0     |    5    |   3  |      —
+  D3 Version Sync        |    1     |    0    |   0  |      —
+  D4 Documentation       |    0     |    2    |   4  |      —
+  D5 Test Coverage       |    0     |    1    |   2  |      —
+  D6 Dependencies        |    1     |    2    |   0  |      —
+  D7 Configuration       |    0     |    3    |   1  |      —
+  D8 Project Structure   |    0     |    1    |   2  |      —
+  D9 Bloat & Redundancy  |    1     |    8    |   5  |      —
+  D10 Contract Parity    |    3     |    4    |   2  |      —
+  D11 Deep-Chain Parity  |    5     |    2    |   0  |      3
+  ─────────────────────────────────────────────────────────────
+  TOTAL                  |   13     |   31    |  20  |      3
 
 ═══ CRITICAL FINDINGS ═══
 
@@ -208,7 +256,7 @@ Repos audited: {count}
     2. apcore-python: parallel HTTP client implementations — see [D9-014]
     3. django-apcore: scope creep in user-auth feature (+3 unplanned files)
 
-═══ CONTRACT PARITY REPORT (D10) ═══
+═══ CONTRACT PARITY REPORT (D10 — SHAPE-LEVEL) ═══
 
   Symbols compared: {N}
   Fully matching: {N}
@@ -226,6 +274,28 @@ Repos audited: {count}
     return.shape:         {N}
     property.*:           {N}
 
+═══ DEEP-CHAIN PARITY REPORT (D11 — CHAIN-LEVEL) ═══
+
+  Delegated to: sync Step 4C (report saved: {audit-d11-{date}.md})
+  Modules analyzed: {N}
+  Modules complete / failed / inconclusive: {n} / {n} / {n}
+  Findings: critical {n} / warning {n} / info {n} / inconclusive {n}
+
+  By finding type:
+    semantic-divergence:    {N}
+    missing-validation:     {N}
+    missing-registration:   {N}
+    defensive-gap:          {N}
+    error-path-divergence:  {N}
+    contract-gap:           {N}
+
+  Top divergences (act on these first):
+    1. [D11-004] missing-registration — Registry.discover (Rust discover_internal skips modules map insert)
+    2. [D11-007] defensive-gap — Registry._discoverCustom (TS crashes on null discoverer result)
+    3. [D11-011] missing-validation — Registry._discover_custom (Python bare subscript on entry["module_id"])
+
+  D11 findings are cross-language intent divergences. All are MANUAL_REVIEW_ONLY — auto-fix cannot port logic semantics safely.
+
 ═══ HEALTH SCORE ═══
 
   Overall: {score}/100
@@ -237,6 +307,7 @@ Repos audited: {count}
   Dependencies: {score}/100
   Leanness (D9):     {score}/100
   Contract Parity (D10): {score}/100
+  Deep-Chain Parity (D11): {score}/100 — see shared/scoring.md for formula
 ```
 
 **Score formulas:** Leanness (D9) and Contract Parity (D10) formulas are defined canonically in `shared/scoring.md`. Use those formulas — do not re-implement. Any threshold change (e.g., release-gate BLOCK threshold) must be updated there, not inline here.
@@ -293,6 +364,10 @@ Use the `# Project Review:` header with a dynamic scope description (derived fro
 | **D10** | **critical** | **blocker** | **Missing input validation or missing raised error type** — users hit silent bugs; **integration missing required arg into core SDK**; **integration calling removed core SDK API** |
 | **D10** | **critical** | **critical** | **Side-effect order divergence, return shape divergence, thread_safe/async property divergence**; **integration calling non-thread-safe core SDK method from concurrent handlers** |
 | **D10** | **warning** | **warning** | **Spec silent on Contract (cross-repo-only mode); extraction limit (null vs true/false); extra error raised beyond spec**; **integration missing handler for a documented core SDK error**; **integration calling deprecated core SDK API** |
+| **D11** | **critical** | **blocker** | **`missing-registration`** — public method fails to update a map/collection peers update (breaks later `get`/`list` semantics) |
+| **D11** | **critical** | **critical** | **`semantic-divergence` / `missing-validation` / `defensive-gap` / `error-path-divergence` / `contract-gap`** (cross-language chain divergences) |
+| **D11** | **warning** | **warning** | **Order-only divergence** (same mutations, different order); **extra checkpoint/mutation in one language not in peers** |
+| **D11** | **inconclusive** | **warning** | **Deep-chain sub-agent flagged uncertainty** — emit as warning with title prefix `[inconclusive]` and suggestion `"manual review required — static analysis could not determine whether divergence is intentional"`. Never silently dropped. |
 | any | info | _(skip)_ | info-level findings are not actionable bugs |
 
 **Rules:**
@@ -364,6 +439,7 @@ Group fixable findings by repo. Separate unfixable findings for reporting.
 **Unfixable (skip and report):**
 - API surface fixes (complex — delegate to `/apcore-skills:sync --phase a --fix`)
 - Contract parity fixes (D10 — delegate to `/apcore-skills:sync --internal-check=contract --fix`, or pipe the review-compatible output from Step 3.1 to `/code-forge:fix --review`)
+- **Deep-chain fixes (D11 — MANUAL REVIEW ONLY, never auto-fix.)** Chain-level divergences require porting logic semantics between languages, which pattern-matching cannot do safely. Surface in MANUAL_REVIEW_ITEMS with the full evidence block and sub-agent recommendation. The operator may pipe the Step 3.1 review output to `/code-forge:fix --review`, but the fix agent itself must treat D11 findings as requiring human authorship — not copy-paste translation.
 - Dependency fixes (risky — show as recommendations only)
 
 **Fixable (per-repo parallel sub-agents):**
