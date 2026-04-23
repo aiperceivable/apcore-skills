@@ -200,7 +200,39 @@ After all dimension sub-agents return and findings are collected, run this valid
 
 Track drop counts per bucket — they surface in the Step 3 report summary.
 
-**2.5.1 Gate 6 verification scan (applies to critical, warning, info — all severities):**
+**2.5.1 D10/D11 cross-dimension deduplication (applies FIRST, before gate 6):**
+
+D10 (Contract Parity — shape-level) and D11 (Deep-Chain Parity — chain-level) are designed to be complementary, but by construction they can catch the same bug from two angles — D10 sees a spec-shape divergence and D11 sees the call-graph divergence underlying it. The same root-cause defect then appears as two findings, inflating both the critical and warning counts.
+
+Scan every D11 finding's `detail` field for cross-reference markers:
+
+- **Explicit mapping markers:** `(maps to D10-NNN)`, `(maps to D10-\d+)`, `(same as D10-NNN)`, `(see D10-NNN)`
+- **Implicit same-root markers:** the D11 finding's `symbol` + `category` pair matches an existing D10 finding's `symbol` + `category` pair AND the D11 `detail` is a more specific instance of the D10 `detail` (contains the same defect keyword: same divergent method name, same error type, same canonicalization algorithm, etc.)
+
+**Dedup rule — preserve D10, drop D11 dup:**
+
+When a D11 finding is identified as a duplicate:
+1. Find the target D10 finding by id (explicit) or by `(symbol, category)` pair (implicit).
+2. Append D11's `location` AND D11's call-graph evidence to the D10 finding's `evidence` field as an **additional** citation block. Prefix with `[from D11-NNN chain-level]` so the reviewer can see both angles in one finding.
+3. Drop the D11 finding from the findings list.
+4. Track the drop as `n_d10_d11_dedup`.
+
+**Rationale for preserving D10 over D11:**
+- D10 carries the trust-boundary / contract-specification context that matters for severity calibration (Gate 3 analog)
+- D10 findings are more actionable — they point to the spec shape that must align, not just one implementation's call chain
+- The merged evidence (D10's shape-level + D11's chain-level) is strictly more useful than either alone
+
+**Implicit-match safeguard — do NOT dedup when:**
+- The two findings have different `severity` AND the difference represents a genuine severity disagreement (e.g., D10 flagged as warning, D11 flagged as critical because the chain reveals a reachable trigger D10 missed). In this case, **keep the higher-severity finding and drop the lower-severity one** — still count as dedup.
+- The D11 finding is in a separate module from the D10 symbol and the `category` is `missing-registration` or `defensive-gap` (these are chain-specific defects that D10's shape-level view genuinely cannot see — not duplicates).
+
+**Never dedup across dimensions other than D10↔D11.** Do not merge D9 dead-export findings into a D10 contract finding even if the root cause is the same stub function — different dimensions serve different consumers and severity audit trails.
+
+Track the count. Surface in the Noise-Control header.
+
+---
+
+**2.5.2 Gate 6 verification scan (applies to critical, warning, info — all severities):**
 
 Scan every finding's `detail`, `category`, and `evidence` fields for Gate 6 trigger phrases:
 
@@ -220,7 +252,7 @@ When a trigger matches, the finding MUST carry ONE of:
 
 Findings failing this check are **dropped** (not downgraded — the factual claim is the load-bearing part of the finding; without verification it has no substance). Track as `n_unverified_claim`.
 
-**2.5.2 Info-level nitpick blocklist (DROP rule, applies to severity=info only):**
+**2.5.3 Info-level nitpick blocklist (DROP rule, applies to severity=info only):**
 
 Info findings are cosmetic by definition — they never reach `/code-forge:fix --review` (audit Step 3.1 severity map drops info) but they still consume reader attention in the ecosystem report. Drop info findings whose `detail` matches:
 
@@ -233,7 +265,7 @@ Info findings are cosmetic by definition — they never reach `/code-forge:fix -
 
 Track as `n_info_nitpick`.
 
-**2.5.3 Info consolidation (MERGE rule):**
+**2.5.4 Info consolidation (MERGE rule):**
 
 Group surviving info findings by `(repo, dimension, category)`. When a group has ≥3 findings, merge them into ONE themed info entry listing every site. Do NOT merge across repos or across dimensions — cross-repo / cross-dimension repetition often signals a real pattern worth preserving as distinct entries.
 
@@ -249,12 +281,12 @@ Themed merge format:
 
 Track merged-away entries (original count − 1 per group) as `n_info_consolidated`.
 
-**2.5.4 Track totals and surface in Step 3 header:**
+**2.5.5 Track totals and surface in Step 3 header:**
 
-Compute `n_total_drops = n_unverified_claim + n_info_nitpick + n_info_consolidated` and include a one-line `Noise-Control` header in the Step 3 report:
+Compute `n_total_drops = n_d10_d11_dedup + n_unverified_claim + n_info_nitpick + n_info_consolidated` and include a one-line `Noise-Control` header in the Step 3 report:
 
 ```
-Noise-Control: {n_total_drops} findings suppressed · {n_unverified_claim} unverified-factual-claim · {n_info_nitpick} info-nitpick · {n_info_consolidated} info-consolidated
+Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-deduplicated · {n_unverified_claim} unverified-factual-claim · {n_info_nitpick} info-nitpick · {n_info_consolidated} info-consolidated
 ```
 
 If `n_unverified_claim > 0`, also print a per-dimension breakdown so the operator can see which sub-agent prompt is under-producing evidence (this feeds back into skill tuning):
@@ -275,7 +307,7 @@ apcore-skills audit — Ecosystem Consistency Report
 Date: {date}
 Scope: {scope}
 Repos audited: {count}
-Noise-Control: {n_total_drops} findings suppressed · {n_unverified_claim} unverified-factual-claim · {n_info_nitpick} info-nitpick · {n_info_consolidated} info-consolidated
+Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-deduplicated · {n_unverified_claim} unverified-factual-claim · {n_info_nitpick} info-nitpick · {n_info_consolidated} info-consolidated
 {if n_unverified_claim > 0:}
   Unverified claims dropped by dimension: {D9: N, D10: N, D1: N, ...}
 

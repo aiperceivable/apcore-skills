@@ -133,8 +133,16 @@ For every row where languages diverge, emit one finding. **Default severity is `
 | `missing-validation` | One language omits an input check another language performs (format, range, type) | `critical` if malformed input would corrupt state; `warning` if it only widens accepted inputs |
 | `missing-registration` | One language's public method fails to update an internal map/collection that other languages update | `critical` — this makes subsequent `get` / `list` calls inconsistent |
 | `defensive-gap` | Language lacks try/except/null-guard that peer languages have, making it crash on malformed external input | `critical` if the input comes from an external/untrusted source (user plugin, config file, network); `warning` if source is internal |
-| `error-path-divergence` | Error raised differs in type, code, or condition across languages | `critical` — spec error contract violation |
+| `error-path-divergence` | Error raised differs in type, code, or condition across languages | `critical` when a cross-repo caller's `except X` / `catch X` / `match X` would silently miss one repo's error OR the error path skips a security-contract side-effect (audit flush, approval prompt, token rotation). Otherwise `warning` — pure error-class-name divergence without observable caller breakdown = warning. See audit `dimension-prompts.md` §D10 Severity Calibration. |
 | `contract-gap` | Public behavior diverges from spec `## Contract:` block | `critical` |
+
+**Severity calibration (cross-reference to D10).** Before emitting any `critical` finding, re-check against audit `references/dimension-prompts.md` §D10 Severity Calibration Steps 1–3:
+- **Step 1** — name the concrete observable trigger + wrong behavior in one sentence; if you cannot, downgrade to `warning`.
+- **Step 2** — security-gated surfaces (`Sandbox.*`, `AuditLogger.*`, `AuthProvider.*`, `*ApprovalHandler.*` / `check_approval`) keep `critical` on any runtime-behavior divergence.
+- **Step 3** — language-idiom shapes (error-class-name-only, async-no-work, process-exit-vs-Result-in-library, constructor-name-prefix, Optional-wrapping equivalence) max at `warning`.
+- **Step 4** — append the calibration trace to `detail`: `[severity-calibration: ...]`.
+
+The D11 default `inconclusive` still applies — when in doubt, use `inconclusive` rather than guessing between `critical` and `warning`.
 
 **`inconclusive` is a valid and important status.** Use it whenever:
 - Only some languages have the feature and you can't tell if that's intentional

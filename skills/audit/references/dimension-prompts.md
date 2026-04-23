@@ -490,7 +490,7 @@ FINDINGS:
      covering at least src/ + tests/ + examples/ for dead-code claims.
      For duplicate / parallel_impl / reimplements: cite BOTH sides with {repo}/{path}:{line}.
      A narrative summary like "grep returns only the declaration" is insufficient — it will
-     be dropped by the orchestrator's Step 2.5.1 verification scan.}
+     be dropped by the orchestrator's Step 2.5.2 verification scan.}
 BLOAT_SUMMARY:
 - repo: {repo-name}
   total_loc: {N}
@@ -589,6 +589,44 @@ Severity guidance:
 - critical: intent divergence — implementation will produce different observable outcomes for the same input
 - warning: spec is silent / extraction cannot determine / extra behavior that may be a language-specific enhancement
 - info: cosmetic divergence (condition phrasing differs but error type matches)
+
+**Severity calibration (MANDATORY — apply after classifying by the table above, BEFORE emitting the finding):**
+
+Cross-language SDK audits have a systemic bias toward over-escalating language-idiom differences to `critical`. Apply this four-step re-check to every candidate `critical` finding (Steps 1–3 decide severity; Step 4 is the audit trail):
+
+**Step 1 — Observable-wrong-behavior test.** Can you name a concrete trigger input + the resulting observable divergence that a downstream caller / end user would encounter? "Observable" means: different exit code, different error *class hierarchy* (not just different name), different returned data shape *as consumed by a caller*, different side-effect ordering that a downstream test could detect, different audit-log content, different security posture. If you cannot name the concrete trigger AND the observable divergence in one sentence → downgrade to `warning`.
+
+**Step 2 — Security-gate exception.** The following contract surfaces are security-gated by design; any runtime-behavior divergence on them REMAINS `critical` even if the divergence is "only" naming / type-shape / defensive-check depth:
+- `Sandbox.*` — subprocess isolation, env whitelisting, resource limits
+- `AuditLogger.*` — log writes, hash input canonicalization, user resolution
+- `AuthProvider.*` — credential read, API-key precedence, token construction, header mutation
+- `*ApprovalHandler.*` / `check_approval` — prompt, timeout vs denial distinction, audit-flush-on-denial
+
+Divergences on these surfaces keep `critical` regardless of Step 1. A non-security contract (e.g. `ExposureFilter.from_config` error class name) does NOT get this exemption.
+
+**Step 3 — Language-idiom drop list (max severity = `warning`, often drop to `info` or skip):**
+
+Candidates matching any of these SHAPES are language-idiom differences, not bugs:
+- **Cross-language error-class-name divergence with same semantic role** — e.g. Python `click.BadParameter` vs TS `Error` vs Rust `Err(String)`, all raised for "invalid mode", all causing the caller to receive an error-type value. → `warning`. Escalate to `critical` ONLY when a documented cross-repo caller's `except X` / `catch (e: X)` / `match X` would silently miss one repo's error (provide the caller location as evidence).
+- **Async vs sync signature divergence where no language performs real async I/O** — TS marked `async` for parity with a Promise-returning API surface but body does zero await, other languages sync. → `warning`. The fix is "remove async", not "align all three".
+- **`process::exit` / `sys.exit` vs `Result` return in library code** — a hygiene issue (can't embed in a longer CLI) but only `critical` when a documented embedding contract explicitly promises "caller controls exit". If the function is purely a CLI-entrypoint with no embedding promise → `warning`.
+- **Constructor-name language idioms** — e.g. Rust `try_from_yaml` vs Py/TS `from_yaml`; Rust's `try_` prefix convention for fallible constructors is idiomatic. Missing peer only matters if it creates a behavioral parity gap (fallible-vs-infallible semantics). If both versions are fallible, just with different naming → `warning`. If Rust has an infallible `from_yaml` too (which is the case when `try_from_yaml` is added alongside) → `info`.
+- **Defensive depth difference where the excess check in the stricter repo catches inputs that the looser repo would reject one step later with the same error class** → `warning`. Only `critical` when the looser repo returns/succeeds where the stricter one would error, OR when the error classes genuinely differ per the rule above.
+- **Struct-field or config-key superset/subset across repos where the missing field is a TODO/stub with no consumer yet** → `warning` (belongs under D9 dead-code anyway). The D10-critical slot is for divergent RUNTIME BEHAVIOR, not for "language X is missing a future field".
+- **Return-type wrapping difference where the wrapping is a language-idiomatic type that exposes the same data** — e.g. Python `Optional[str]` vs TS `string | null` vs Rust `Option<String>` all hold the same semantics. → `info` (drop, not a bug). BUT: Rust `Option<String>` vs Py `Any` / TS `unknown` where native YAML types (int/bool/list) are stringified on Rust IS a critical divergence (see D10-002 example — this is NOT the same as the above).
+
+**Step 4 — Record the calibration step in the finding's `detail` for reviewer transparency.** After emitting the finding, append ONE `[severity-calibration: ...]` line. Choose ONE value depending on what happened:
+
+| Situation | Trace value to append |
+|---|---|
+| Finding passed Step 1 cleanly (no downgrade needed) | `[severity-calibration: observable-divergence verified]` |
+| Finding was `critical` and survived via Step 2 security-gate exception | `[severity-calibration: critical preserved — security-gated surface ({Sandbox|AuditLogger|AuthProvider|ApprovalHandler})]` |
+| Finding was downgraded per Step 3 language-idiom rule | `[severity-calibration: downgraded from critical — {error-class-name-only|async-no-work|embedding-hygiene|constructor-name-idiom|defensive-depth|stub-field|type-wrapping}]` — pick the SINGLE matching rule name, not the whole list |
+| Finding was downgraded per Step 1 (could not name observable divergence) | `[severity-calibration: downgraded from critical — no observable trigger]` |
+
+Example good trace: `detail: "... [severity-calibration: downgraded from critical — async-no-work]"` (short, machine-parseable, reviewer can scan the `detail` field to audit the calibration itself).
+
+The orchestrator's Step 2.5 gate does not re-run this calibration — the sub-agent must apply it at emission time. A `critical` finding lacking the calibration trace in `detail` after the next audit cycle will be flagged for sub-agent prompt reinforcement.
 
 Error handling:
 - If a repo path does not exist, skip it and report as INFO finding "Repo not found at {path}"
