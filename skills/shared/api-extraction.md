@@ -255,14 +255,15 @@ For each public method body, extract the ordered list of `checkpoint:NAME` marke
 > **Fast path (preferred).** Instead of spawning a sub-agent to grep, run:
 >
 > ```
-> "<scripts_dir>/extract-markers.sh" <repo>/src [<more dirs>...]
+> <scripts_dir>/extract-markers.sh <repo>/src [<more dirs>...]
 > ```
 >
-> `<scripts_dir>` is the apcore-skills plugin's `shared/scripts/` directory
-> (`"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env var is set) — the
-> script is bundled in the plugin, not the user's project. Its **arguments** are
-> the user-project source dirs to scan; output goes to stdout only. Do not invoke
-> it as a bare CWD-relative path.
+> **Locating `<scripts_dir>`** — `extract-markers.sh` is bundled beside this file
+> under `shared/scripts/` (Claude Code: `$CLAUDE_PLUGIN_ROOT/skills/shared/scripts`;
+> Codex / bundled: `shared/scripts/` relative to this skill, rewritten by the
+> bundler), NOT in the user's project. Its **arguments** are the user-project
+> source dirs to scan; output goes to stdout only. If you cannot locate it, fall
+> back to the per-language grep patterns below.
 >
 > It emits `path:line:name` for every marker in file/line order and drops
 > obvious comment-only lines. Map each `path:line` to its enclosing method using

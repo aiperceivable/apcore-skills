@@ -10,14 +10,15 @@ All scores are integers in `[0, 100]`. Start at 100 and subtract per finding; fl
 >
 > ```
 > echo '{"d9":{...},"d10":{...},"d11":{...},"gate":{"audit_critical":N,"sync_critical":N}}' \
->   | python3 "<scripts_dir>/score.py"
+>   | python3 <scripts_dir>/score.py
 > ```
 >
-> `<scripts_dir>` is the apcore-skills plugin's `shared/scripts/` directory
-> (beside this file; `"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env
-> var is set) — the script is bundled in the plugin, not the user's project. It
-> reads JSON on stdin and writes JSON on stdout (no file I/O), so it is safe to
-> run from any directory; do not invoke it as a bare CWD-relative path.
+> **Locating `<scripts_dir>`** — `score.py` is bundled beside this file under
+> `shared/scripts/` (Claude Code: `$CLAUDE_PLUGIN_ROOT/skills/shared/scripts`;
+> Codex / bundled: `shared/scripts/` relative to this skill, rewritten by the
+> bundler). It reads JSON on stdin and writes JSON on stdout (no file I/O), so it
+> is safe to run from anywhere. If you cannot locate it or lack Python, compute
+> the formulas below by hand — they are the authoritative fallback.
 >
 > It returns `leanness`, `contract_parity`, `deep_chain_parity` (display ints),
 > `bars` (10-cell `▓░` strings), and the release `gate` decision + `gate_reason`.

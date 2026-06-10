@@ -6,17 +6,20 @@
 > build files in-context:
 >
 > ```
-> python3 "<scripts_dir>/discover.py" [--root <ecosystem_root>]
+> python3 <scripts_dir>/discover.py [--root <ecosystem_root>]
 > ```
 >
-> **Resolving `<scripts_dir>`** — the script ships **inside the apcore-skills
-> plugin, beside this file** (`shared/scripts/`), NOT in the user's project. Use
-> `"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env var is set;
-> otherwise resolve `scripts/` relative to the absolute path this `ecosystem.md`
-> was loaded from. **Never run it as a bare CWD-relative path** — the CWD is the
-> user's ecosystem (what the script *scans*), not where the script lives. Omit
-> `--root` to let it auto-detect the ecosystem by searching upward from the real
-> CWD, which is the intended behavior.
+> **Locating `<scripts_dir>`** — `discover.py` is bundled with apcore-skills
+> beside this file under `shared/scripts/`, NOT in the user's project (the CWD is
+> the ecosystem to *scan*, never where the script lives). Resolve per platform:
+> - **Claude Code:** `$CLAUDE_PLUGIN_ROOT/skills/shared/scripts`.
+> - **Codex / bundled:** `shared/scripts/` resolved relative to this skill (the
+>   bundler rewrites this to the in-bundle path).
+> - **Cannot resolve it, or no Python?** Skip to the markdown rules below — they
+>   are the authoritative fallback. Never block on the script.
+>
+> Omit `--root` to auto-detect the ecosystem by searching upward from the real CWD
+> (the user's location) — the intended behavior.
 >
 > It emits a JSON object with `ecosystem_root`, `repos[]` (each with `name`,
 > `path`, `type`, `language`, `version`, `package_name`, `git_status`, `status`),
