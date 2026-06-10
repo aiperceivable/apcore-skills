@@ -2,6 +2,34 @@
 
 **Important:** Detect the ecosystem layout before any operation.
 
+> **Fast path (preferred).** Run the bundled discovery script instead of reading
+> build files in-context:
+>
+> ```
+> python3 "<scripts_dir>/discover.py" [--root <ecosystem_root>]
+> ```
+>
+> **Resolving `<scripts_dir>`** — the script ships **inside the apcore-skills
+> plugin, beside this file** (`shared/scripts/`), NOT in the user's project. Use
+> `"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env var is set;
+> otherwise resolve `scripts/` relative to the absolute path this `ecosystem.md`
+> was loaded from. **Never run it as a bare CWD-relative path** — the CWD is the
+> user's ecosystem (what the script *scans*), not where the script lives. Omit
+> `--root` to let it auto-detect the ecosystem by searching upward from the real
+> CWD, which is the intended behavior.
+>
+> It emits a JSON object with `ecosystem_root`, `repos[]` (each with `name`,
+> `path`, `type`, `language`, `version`, `package_name`, `git_status`, `status`),
+> `repos_by_type`, `version_groups`, `cwd_repo`, and the `core_sdks` /
+> `mcp_bridges` / `integrations` shortcuts — exactly the values §0.2–0.7 define.
+> Parse its stdout and proceed to Step 1.
+>
+> - If it prints `{"error": "ecosystem_root_not_found"}` (exit 2), fall back to
+>   the `AskUserQuestion` flow in §0.1.
+> - If Python is unavailable, the script errors, or output looks wrong, **execute
+>   the markdown rules below directly** — they remain the authoritative spec and
+>   the fallback. Keep script and tables in sync (`discover.py --selftest`).
+
 #### 0.1 Detect Ecosystem Root
 
 Search for the ecosystem root by looking for the `apcore` protocol specification repo. Search strategy:

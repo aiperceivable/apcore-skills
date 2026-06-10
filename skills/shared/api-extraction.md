@@ -252,6 +252,24 @@ When the spec declares a parameter default, each language expresses it different
 
 For each public method body, extract the ordered list of `checkpoint:NAME` markers literally present in the source. This is the input for sync's Step 4A skeleton consistency check.
 
+> **Fast path (preferred).** Instead of spawning a sub-agent to grep, run:
+>
+> ```
+> "<scripts_dir>/extract-markers.sh" <repo>/src [<more dirs>...]
+> ```
+>
+> `<scripts_dir>` is the apcore-skills plugin's `shared/scripts/` directory
+> (`"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env var is set) — the
+> script is bundled in the plugin, not the user's project. Its **arguments** are
+> the user-project source dirs to scan; output goes to stdout only. Do not invoke
+> it as a bare CWD-relative path.
+>
+> It emits `path:line:name` for every marker in file/line order and drops
+> obvious comment-only lines. Map each `path:line` to its enclosing method using
+> the API summary (per-method scoping stays your job — a grep cannot parse method
+> boundaries across five languages). The per-language patterns below are the spec
+> and the fallback.
+
 **Marker conventions (per language).** Sub-agents grep for these literal patterns inside the method body, in source order:
 
 | Language | Pattern (regex) | Example call site |

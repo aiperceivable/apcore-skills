@@ -1,0 +1,30 @@
+name: shared-scripts
+
+# Narrow trigger: only when the deterministic helpers or the markdown specs they
+# mirror change. Guards against script <-> spec drift (see shared/scripts/README.md).
+on:
+  push:
+    paths:
+      - 'skills/shared/scripts/**'
+      - 'skills/shared/ecosystem.md'
+      - 'skills/shared/scoring.md'
+      - 'skills/shared/api-extraction.md'
+      - '.github/workflows/scripts.yml'
+  pull_request:
+    paths:
+      - 'skills/shared/scripts/**'
+      - 'skills/shared/ecosystem.md'
+      - 'skills/shared/scoring.md'
+      - 'skills/shared/api-extraction.md'
+      - '.github/workflows/scripts.yml'
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run shared/scripts drift guard
+        run: bash skills/shared/scripts/test.sh

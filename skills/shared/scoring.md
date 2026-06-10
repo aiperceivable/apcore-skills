@@ -4,6 +4,27 @@ Canonical formulas for ecosystem health metrics. Referenced by audit (Step 3 Hea
 
 All scores are integers in `[0, 100]`. Start at 100 and subtract per finding; floor at 0.
 
+**Rounding policy.** Displayed scores are rounded **half-up** to an integer in `[0, 100]`. Release-gate threshold comparisons (the `< 70` / `< 90` rules below) use the **exact, unrounded** value, so a raw score of `89.5` is treated as `< 90` (WARN) and is never rounded up across a gate boundary.
+
+> **Fast path (preferred).** Compute these in code instead of by hand:
+>
+> ```
+> echo '{"d9":{...},"d10":{...},"d11":{...},"gate":{"audit_critical":N,"sync_critical":N}}' \
+>   | python3 "<scripts_dir>/score.py"
+> ```
+>
+> `<scripts_dir>` is the apcore-skills plugin's `shared/scripts/` directory
+> (beside this file; `"$CLAUDE_PLUGIN_ROOT/skills/shared/scripts"` when that env
+> var is set) — the script is bundled in the plugin, not the user's project. It
+> reads JSON on stdin and writes JSON on stdout (no file I/O), so it is safe to
+> run from any directory; do not invoke it as a bare CWD-relative path.
+>
+> It returns `leanness`, `contract_parity`, `deep_chain_parity` (display ints),
+> `bars` (10-cell `▓░` strings), and the release `gate` decision + `gate_reason`.
+> Pass `{"repos": {name: {...}}}` for the group-min rollup. The formulas below
+> remain authoritative and are the fallback when Python is unavailable; keep them
+> in sync (`score.py --selftest`).
+
 #### Leanness Score (D9 — Bloat & Redundancy)
 
 ```

@@ -78,6 +78,16 @@ Keep context small.
 8. Read `skills/shared/conformance-fixtures.md` when tester or release verification needs shared fixtures.
 9. Read `skills/shared/scoring.md` when reports need health scores.
 10. Read `skills/shared/strict-suppression.md` when audit or sync strict/lean behavior is relevant.
+11. Prefer the deterministic helpers bundled in this plugin's
+    `skills/shared/scripts/` over re-deriving their work in context: `discover.py`
+    (ecosystem discovery, Step 0), `score.py` (health scores + release gate),
+    `extract-markers.sh` (checkpoint markers). **Resolve their paths relative to
+    this plugin** (`$CLAUDE_PLUGIN_ROOT` when set, else the absolute path this
+    skill was loaded from) — never from the user's CWD, which is the project being
+    operated on, not where the scripts live. The scripts are read-only and write
+    only to stdout, so they are safe to run against any project. Each mirrors a
+    shared markdown spec, which stays the authoritative fallback. See
+    `skills/shared/scripts/README.md`.
 
 Do not bulk-load every child skill. Do not read every shared reference unless the
 selected workflow requires it.
