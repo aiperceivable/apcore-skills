@@ -677,7 +677,7 @@ Spec sources: {spec_repo_names and doc counts}
   To re-verify after fix: run /apcore-skills:tester --mode run
 ```
 
-If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/tester-report-{YYYY-MM-DD}.md`.
+If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/tester-report-{cwd_repo}-{YYYY-MM-DD}.md`, where `{cwd_repo}` is the session's CWD repo/dir name resolved in Step 0. Including `{cwd_repo}` keeps same-day runs from different repos in separate files (no cross-scope overwrite) while a re-run of the same scope on the same day overwrites its own file idempotently (clean regeneration, never appended to history). The Write is always a full-file overwrite — reports are never concatenated with prior runs.
 
 #### 5.1 Review-Compatible Issue Report
 

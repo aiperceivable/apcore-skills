@@ -769,7 +769,7 @@ FAIL items (expanded):
      Verification: static-inference
 ```
 
-If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-a-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other), or the explicit path if one was provided. Write is a full-file overwrite — never concatenated with prior runs.
 
 If `--phase a` only: display this report and stop. Otherwise continue to Phase B.
 
@@ -929,7 +929,7 @@ Store merged findings in `phase_b_behavior_findings` for inclusion in Step 8 and
   Link consistency: {PASS|FAIL}
 ```
 
-If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-b-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-b-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other), or the explicit path if one was provided. Write is a full-file overwrite — never concatenated with prior runs.
 
 ---
 
@@ -1037,7 +1037,7 @@ INFO:
   Contradictions (cross-repo): {N}
 ```
 
-If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-{YYYY-MM-DD}.md` (or the explicit path if one was provided).
+If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently), or the explicit path if one was provided. Write is a full-file overwrite — never concatenated with prior runs.
 
 #### 9.0 Noise-Control Pass (RUN FIRST — before rendering the combined-report template above)
 

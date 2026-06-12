@@ -200,13 +200,13 @@ Every skill that produces a report and accepts `--save` MUST use these canonical
 
 | Skill | Invocation | Canonical default path |
 |---|---|---|
-| audit | `/apcore-skills:audit --save` (no arg) | `{ecosystem_root}/audit-report-{YYYY-MM-DD}.md` |
+| audit | `/apcore-skills:audit --save` (no arg) | `{ecosystem_root}/audit-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
 | audit (from release gate) | release Step 2.5.1 | `{ecosystem_root}/release-audit-{version}.md` |
-| sync | `/apcore-skills:sync --save` (no arg) | `{ecosystem_root}/sync-report-{YYYY-MM-DD}.md` |
-| sync Phase A only | `/apcore-skills:sync --phase a --save` | `{ecosystem_root}/sync-report-phase-a-{YYYY-MM-DD}.md` |
-| sync Phase B only | `/apcore-skills:sync --phase b --save` | `{ecosystem_root}/sync-report-phase-b-{YYYY-MM-DD}.md` |
+| sync | `/apcore-skills:sync --save` (no arg) | `{ecosystem_root}/sync-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
+| sync Phase A only | `/apcore-skills:sync --phase a --save` | `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` |
+| sync Phase B only | `/apcore-skills:sync --phase b --save` | `{ecosystem_root}/sync-report-phase-b-{cwd_repo}-{YYYY-MM-DD}.md` |
 | sync (from release gate) | release Step 2.5.2 | `{ecosystem_root}/release-sync-{version}.md` |
-| tester | `/apcore-skills:tester --save` (no arg) | `{ecosystem_root}/tester-report-{YYYY-MM-DD}.md` |
+| tester | `/apcore-skills:tester --save` (no arg) | `{ecosystem_root}/tester-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
 | tester (from release gate) | release Step 6 | `{ecosystem_root}/release-tester-{version}.md` |
 | tester (from sdk gate) | sdk Step 9.5.2 | `{ecosystem_root}/sdk-bootstrap-tester-{target-repo-name}.md` |
 | release overrides | release Step 2.5.3 BLOCK override | `{ecosystem_root}/release-overrides-{version}.md` |

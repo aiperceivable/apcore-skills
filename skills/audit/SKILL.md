@@ -440,7 +440,7 @@ Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-
 
 **Score formulas:** Leanness (D9) and Contract Parity (D10) formulas are defined canonically in `shared/scoring.md`. Use those formulas — do not re-implement. Any threshold change (e.g., release-gate BLOCK threshold) must be updated there, not inline here.
 
-If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/audit-report-{YYYY-MM-DD}.md`.
+If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/audit-report-{cwd_repo}-{YYYY-MM-DD}.md`, where `{cwd_repo}` is the session's CWD repo/dir name resolved in Step 0. Including `{cwd_repo}` keeps same-day runs from different repos in separate files (no cross-scope overwrite); a re-run of the same scope on the same day overwrites its own file idempotently. The Write is always a full-file overwrite — reports are never concatenated with prior runs.
 
 ---
 
