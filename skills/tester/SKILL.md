@@ -42,6 +42,7 @@ Spec-driven test generation and cross-language behavioral verification.
 | "I can skip running tests in language X — it probably works" | "Probably works" is not evidence. Run in every language or don't claim consistency. |
 | "The test already exists so I don't need to regenerate it" | Existing tests may be stale if the spec evolved. Always diff against current spec before skipping generation. |
 | "I'll mock the executor to speed up tests" | Mocks hide real behavioral differences. Use real code paths wherever possible. Only mock external services (network, filesystem, time). |
+| "It's a green `it()`/`def test_`, so the clause is enforced in that language" | A green test only proves enforcement if it *asserts* enforcement. A test named `…: SKIP — emit() does not validate…` whose body is `expect(true).toBe(true)` is a **documented-skip placeholder** — it documents NON-enforcement and passes vacuously. Counting it as PASS fabricates a cross-language divergence. Before declaring a clause divergence, verify each side is a *real* PASS (non-trivial assertion of the behavior), a *real* SKIP (`it.skip`/`@pytest.mark.skip`/`#[ignore]`), or a placeholder — see Step 4's skip-vs-placeholder gate. Reclassify placeholders to SKIP. |
 
 ## When to Use
 
@@ -413,6 +414,12 @@ Capture:
 4. Failure details: test name, assertion message, expected vs actual
 5. Coverage if available (append --cov for pytest, --coverage for vitest)
 
+**Documented-skip placeholder detection (run on every test reported PASS):**
+A test runner reports a test as PASS whenever it executes without a failing assertion — including tests that assert nothing meaningful. Such "green placeholders" must NOT be reported as a true PASS, because Step 4 would read them as "behavior enforced in this language" and fabricate a divergence. For each PASS test, inspect its name/description AND its source body, and reclassify it to `PLACEHOLDER` if EITHER holds:
+  a. The name/description contains `SKIP`/`SKIPPED`/`NOT ENFORCED`/`does not validate`/`no-op`/`fire-and-forget` (case-insensitive) but the test is NOT a real skip construct (`it.skip` / `test.skip` / `@pytest.mark.skip` / `pytest.skip(...)` / `#[ignore]` / `t.Skip(...)`). A green `it(...)`/`def test_...` whose *name* announces a skip is a placeholder documenting non-enforcement, not enforcement.
+  b. The body is a trivial tautology or empty after setup: `expect(true).toBe(true)`, `assert True`, `assert 1 == 1`, `t.Log(...)` with no assertion, `assert x is not None` as the only check, or no assertion at all.
+To inspect the body, open the test file at the reported location and read the function/`it` block. When in doubt (cannot locate the body, or assertion is ambiguous), classify as `PLACEHOLDER` and explain — under-counting enforcement is safe; over-counting it invents divergences.
+
 Error handling:
 - If dependencies not installed: report STATUS: DEPS_MISSING and list missing packages
 - If test runner not found: report STATUS: RUNNER_MISSING
@@ -424,9 +431,10 @@ REPO: {repo-name}
 LANGUAGE: {language}
 STATUS: {pass|fail|deps_missing|runner_missing|timeout}
 TOTAL: {N}
-PASSED: {N}
+PASSED: {N}             # true PASS only — placeholders excluded
 FAILED: {N}
 SKIPPED: {N}
+PLACEHOLDER: {N}        # green tests reclassified as documented-skip placeholders
 COVERAGE: {pct or "unknown"}
 FAILURES:
 - test: {test_name}
@@ -435,8 +443,16 @@ FAILURES:
   expected: {expected value}
   actual: {actual value}
   location: {file:line}
+PLACEHOLDERS:
+- test: {test_name}
+  clause_id: {CLAUSE-ID from test docstring/comment, or "unknown"}
+  reason: {name_announces_skip|trivial_tautology|empty_body}
+  evidence: {the offending body line, e.g. `expect(true).toBe(true)`, or the skip-announcing name fragment}
+  location: {file:line}
 ---
 ```
+
+Report each placeholder under `PLACEHOLDERS` and exclude it from `PASSED`. A clause whose ONLY test in this repo is a placeholder is **not enforced** here — treat it as effectively SKIP for Step 4, never as PASS.
 
 ---
 
@@ -506,6 +522,14 @@ For each clause ID tested in multiple repos:
 3. If all fail with same reason → **spec gap** (spec may need updating, or feature not implemented anywhere)
 4. If mixed (pass in some, fail in others) → **BEHAVIORAL INCONSISTENCY** (critical finding)
 
+**Skip-vs-placeholder gate (run BEFORE step 4 above declares any divergence):**
+The per-clause status from Step 3 has four values, not two: `PASS`, `FAIL`, `SKIP`, `PLACEHOLDER`. **Normalize `PLACEHOLDER` → `SKIP` before comparing.** A green placeholder documents NON-enforcement; if you leave it as PASS you will read a clause that NO language enforces as "enforced here, missing there" and report a phantom divergence (this is exactly the T-B-001 false-positive class — a TS `it('…: SKIP — emit() does not validate…', () => expect(true).toBe(true))` counted as "enforced in TS" against fire-and-forget Python/Rust).
+
+Apply this rule to a mixed row before calling it INCONSISTENT:
+- A row is a divergence ONLY if at least one side is a **real PASS** (non-trivial assertion of the behavior) and at least one side is a **real FAIL** (the behavior was asserted and the assertion failed). 
+- `SKIP` and `PLACEHOLDER` sides are **"not enforced here"**, not "enforced differently." A row that is all-`SKIP`/`PLACEHOLDER` (plus optionally real PASS where the behavior genuinely IS enforced) is a **coverage/consistency note**, not a behavioral inconsistency — confirm by checking whether the spec clause actually mandates the behavior (RFC 2119 MUST/SHALL) before escalating.
+- If a row looks like a divergence, **open the green side's test body** and confirm it is a real PASS, not a placeholder, before writing the finding. Cite the asserting line in the finding's evidence. If you cannot point to a non-trivial assertion on the PASS side, downgrade the row to a placeholder/coverage note.
+
 Build two consistency matrices.
 
 **Matrix A — Per-language Unit / Contract Clause Diff (clause-ID based):**
@@ -513,16 +537,21 @@ Build two consistency matrices.
 ```
 Cross-Language Behavioral Consistency (Clause):
 
+Cell values: PASS (real, asserts the behavior) | FAIL | SKIP (real skip construct, OR placeholder normalized from Step 3) | — (no test).
+Never write PASS for a Step 3 PLACEHOLDER — it is rendered as SKIP here.
+
 Clause ID                                       | Python | TypeScript | Rust | Status
 EXEC-001                                        | PASS   | PASS       | PASS | consistent
 registry.register.input.id.invalid_pattern      | PASS   | PASS       | FAIL | INCONSISTENT
 registry.register.error.DUPLICATE               | PASS   | FAIL       | PASS | INCONSISTENT
 registry.register.property.thread_safe          | PASS   | FAIL       | PASS | INCONSISTENT
+event_system.emit.input.event_type.not_empty    | SKIP   | SKIP       | SKIP | not-enforced (no divergence — all fire-and-forget; was a phantom INCONSISTENT before placeholder normalization)
 ...
 
 Consistent: {N}/{total} ({pct}%)
 Inconsistent: {N} (CRITICAL — requires investigation)
 Spec gaps: {N}
+Not enforced (all SKIP/placeholder — uniform, NOT a divergence): {N}
 Not tested: {N}
 ```
 
@@ -632,9 +661,13 @@ Spec sources: {spec_repo_names and doc counts}
   Non-trivial assertions: {N}
   Stub detected (rejected): {N}     — auto-converted to skip("needs spec clarification — clause too vague") with the clause-id preserved so re-run can detect when the spec is fixed
   Skipped with explicit reason: {N} — listed below for spec clarification
+  Documented-skip placeholders (Step 3, pre-existing tests): {N} — green tests reclassified to SKIP because they assert nothing / their name announces a skip. NOT counted as PASS; cannot establish cross-language enforcement.
 
   Skips needing spec clarification:
     - {clause-id}: {skip reason}
+
+  Placeholders found in existing tests (reclassified, not phantom PASS):
+    - {repo}/{location} [{clause-id}]: {reason} — {evidence}
 
 ═══ FAILING TESTS AS BUG REPORTS ═══
 
@@ -687,6 +720,7 @@ Severity mapping:
 | Matrix A inconsistency on `contract`-category clause | critical |
 | Matrix A inconsistency on `unit` / `boundary` clause | critical |
 | Authenticity-blocked stub (test body was trivial) | warning — **aggregate one finding per repo**, not per stub; list the clause-ids in `description`. N stubs in one repo produce 1 review entry, not N. |
+| Documented-skip placeholder in a **pre-existing** test (Step 3 reclassified a green test to SKIP) | warning — **aggregate one finding per repo**; list the clause-ids + locations in `description`. Title `[T-A-00x] Documented-skip placeholders masquerading as PASS`. Suggestion: convert to a real skip construct (`it.skip`/`@pytest.mark.skip`/`#[ignore]`) with a reason, or replace the tautology with a real assertion of the clause. Do NOT raise this as a behavioral divergence. |
 | Fixture coverage gap | warning |
 | Spec missing `## Contract:` block (from Step 1.3 warning) | warning |
 
