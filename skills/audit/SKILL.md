@@ -55,7 +55,7 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 
 ## Audit Dimensions
 
-The audit covers 11 dimensions, each checking specific aspects:
+The audit covers 11 dimensions, each checking specific aspects. Coverage is unchanged by how a dimension executes — **D2, D3, D6, D7, D8 run as one deterministic script (Track A); D1, D4, D5, D9, D10, D11 run as sub-agents (Track B)**. See §Context Management.
 
 | # | Dimension | Severity Range | Description |
 |---|---|---|---|
@@ -83,12 +83,21 @@ The audit covers 11 dimensions, each checking specific aspects:
 
 ## Context Management
 
-**All dimension audits and per-repo fixes are executed by parallel sub-agents.** The main context ONLY handles:
-1. Orchestration — determining scope and spawning sub-agents
-2. Aggregation — collecting structured findings from all sub-agents
+Audit execution is split into **two tracks**, by whether a dimension has a judgment component.
+
+| Track | Dimensions | How it runs | Why |
+|---|---|---|---|
+| **A — mechanical** | D2, D3, D6, D7, D8 | One `audit-mechanical.py` call (Step 2a) | Naming regexes, version-string comparison, dependency-table diffing, config-default matching, filesystem layout. Inputs fully determine outputs. |
+| **B — semantic** | D1, D4, D5, D9, D10, D11 | Parallel sub-agents (Step 2b) | Cross-language API normalization, doc quality, test execution, reachability reasoning, contract/call-graph parity. Not reducible to static rules. |
+
+The main context ONLY handles:
+1. Orchestration — determining scope, running the mechanical pass, spawning semantic sub-agents
+2. Aggregation — collecting structured findings from both tracks
 3. Reporting — formatting and displaying the consolidated report
 
-Step 2 spawns **up to 11 parallel sub-agents** (one per dimension, all simultaneously) — D1–D10 run as parallel dimension sub-agents; **D11 delegates to `sync` Step 4C** (which itself spawns one sub-agent per logical module under its own orchestrator). D11's progress updates surface in the audit orchestrator's log just like any other dimension. Step 4 spawns **one parallel sub-agent per repo** for fixes. The main context never reads repo files directly.
+Step 2b spawns **up to 6 parallel sub-agents** (D1, D4, D5, D9, D10, plus the D11 delegation) — down from 11. **D11 delegates to `sync` Step 4C** (which itself spawns one sub-agent per logical module under its own orchestrator). D11's progress updates surface in the audit orchestrator's log just like any other dimension. Step 4 spawns **one parallel sub-agent per repo** for fixes. The main context never reads repo files directly.
+
+**Why the split.** Every sub-agent is a *fresh full context* — harness, tool schemas, the ~9 KB Finding Suppression Gate, and its dimension prompt — before it reads a single repo file, and it then runs its own multi-turn tool loop. Collapsing five mechanical dimensions into one script call removes five such contexts per audit run, and removes LLM error from checks that have a single correct answer. The gate is deliberately **not** applied to Track A: a deterministic checker cannot speculate, pad findings, or misreport a grep it never ran (rationale in `shared/scripts/README.md`).
 
 ## Workflow
 
@@ -156,11 +165,39 @@ Dimensions: {list}
 
 ---
 
-### Step 2: Execute Audit Dimensions (Sub-agents)
+### Step 2: Execute Audit Dimensions
 
-Spawn **all dimension sub-agents in parallel**. Dimensions D1–D10 each run as one parallel sub-agent (up to 10 simultaneously). **D11 runs as a delegated invocation of `sync` Step 4C** (see Step 2.D11 below) — the delegation itself is one sub-agent from the audit orchestrator's POV, which internally fans out to module-level sub-agents. All dimensions are fully independent.
+Two tracks (see §Context Management). Run **Step 2a first** — it is a single fast call whose findings are already final — then spawn Step 2b's sub-agents. Both tracks feed the same finding list consumed by Step 2.5.
 
-**Sub-agent prompts:** Use the dimension-specific prompt templates from `@references/dimension-prompts.md`. Each dimension (D1–D10) has its own section with the full prompt template. Fill in `{repo_paths}` (and `{integration_repo_paths}` for D7, `{doc_repo_path}` for D10) from the scope determined in Step 1.
+#### Step 2a: Mechanical Dimensions — D2, D3, D6, D7, D8 (script, no sub-agent)
+
+Run once:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/skills/shared/scripts/audit-mechanical.py" --root {ecosystem_root}
+```
+
+Add `--repos {name1},{name2}` when Step 1 resolved a narrower scope, and `--only D3,D8` to run a subset. Output is a single JSON object on stdout.
+
+**Consuming the output.** For each key in `dimensions{}`, take `findings[]` verbatim — the fields (`severity`, `repo`, `detail`, `location`, `fix`, `evidence`) are already the uniform finding format, so they merge directly into the Step 2.5 list with no reformatting. D7 additionally carries `config_matrix` (inconsistent settings only) and `config_matrix_consistent_count` for the Step 3 report.
+
+**Surface `not_covered`.** Every dimension carries `checked[]` and `not_covered[]`. The `not_covered` entries name markdown rules this run did **not** evaluate (e.g. D6 vulnerability patterns). Reproduce them in the Step 3 report under the relevant dimension so a fast-path run is never mistaken for full coverage. **Do not silently drop them** — that would turn a coverage gap into a false clean bill of health.
+
+**Fallback (per `shared/scripts/README.md` fast-path contract).** If `python3` is unavailable, the script errors, exits non-zero, or the JSON is missing the `dimensions` key:
+
+- Exit 2 / `ecosystem_root_not_found` → resolve the root per `ecosystem.md` §0.1, then retry once.
+- Any other failure → spawn **ONE** `Agent(subagent_type="general-purpose")` that executes the D2, D3, D6, D7, and D8 sections of `references/dimension-prompts.md` together in a single pass, and prepend the Finding Suppression Gate to that prompt (the fallback *is* an LLM, so it needs the gate).
+- **Never spawn one sub-agent per mechanical dimension** — that is the pattern this step exists to remove. Never block the audit on a missing script.
+
+Note the script's findings bypass the gate by construction, not by omission: it emits only what it matched, with `file:line`, and never pads. Do not "re-verify" its findings with an LLM pass.
+
+#### Step 2b: Semantic Dimensions — D1, D4, D5, D9, D10 (+ D11)
+
+Spawn these **in parallel**, one sub-agent each (up to 5 simultaneously). **D11 runs as a delegated invocation of `sync` Step 4C** (see Step 2.D11 below) — the delegation itself is one sub-agent from the audit orchestrator's POV, which internally fans out to module-level sub-agents. All dimensions are fully independent.
+
+**Sub-agent prompts:** Use the dimension-specific prompt templates from `references/dimension-prompts.md`. Each of D1, D4, D5, D9, D10 has its own section. Prepend the **Finding Suppression Gate** section to each prompt, then append only that dimension's own section — do not paste the whole file into a sub-agent. Fill in `{repo_paths}` (and `{doc_repo_path}` for D10) from the scope determined in Step 1.
+
+> D2, D3, D6, D7, D8 sections remain in `dimension-prompts.md` as the authoritative spec and the Step 2a fallback. Do **not** spawn sub-agents for them on the normal path.
 
 #### Step 2.D11: Deep-Chain Parity (delegates to sync Step 4C)
 
@@ -204,9 +241,23 @@ D11_FINDINGS:
 
 ### Step 2.5: Noise-Control Validation (MANDATORY before Step 3)
 
-After all dimension sub-agents return and findings are collected, run this validation pass over the merged findings BEFORE formatting the Step 3 report. The pass applies the Gate 6 (Factual Verifiability) and info-inflation rules from `@references/dimension-prompts.md` to every finding the sub-agents emitted — the gate is enforced at emission time by each sub-agent, but this orchestrator pass is the final line of defense against sub-agents that summarized evidence instead of pasting it.
+After Step 2a's script returns and all Step 2b sub-agents return, run this validation pass over the merged findings BEFORE formatting the Step 3 report. The pass applies the Gate 6 (Factual Verifiability) and info-inflation rules from `@references/dimension-prompts.md` — the gate is enforced at emission time by each sub-agent, but this orchestrator pass is the final line of defense against sub-agents that summarized evidence instead of pasting it.
 
-Track drop counts per bucket — they surface in the Step 3 report summary.
+> ⚠️ **Apply this pass to Track B findings only (D1, D4, D5, D9, D10, D11).**
+> Track A findings (D2, D3, D6, D7, D8 from `audit-mechanical.py`) are exempt.
+> Gate 6 requires a pasted grep/command output for claims like "unused" or
+> "duplicate"; a deterministic checker instead reports a direct filesystem or
+> parse fact (`Missing LICENSE`, `build config=0.14.0, __version__=0.13.0`) that
+> has no grep to paste. Running the gate over them would drop true findings for
+> lacking evidence they never needed. Track A is trustworthy by construction —
+> it cannot claim a search it did not perform.
+>
+> The **one** Track A finding that carries a trigger-adjacent phrase is D6's
+> cross-repo dependency conflict; it ships its own `evidence` field listing every
+> repo and spec, so it satisfies Gate 6 (b) already. Do not re-verify it with an
+> LLM pass.
+
+Track drop counts per bucket — they surface in the Step 3 report summary. Report Track A and Track B drop counts separately so a zero-drop mechanical track is not read as the gate having failed to run.
 
 **2.5.1 D10/D11 cross-dimension deduplication (applies FIRST, before gate 6):**
 

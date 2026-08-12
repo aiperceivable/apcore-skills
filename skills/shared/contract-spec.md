@@ -131,7 +131,7 @@ Each language implementation must expose the contract's behavior. The checker ex
 
    Hard-to-infer properties (idempotent, reentrant) in contract tier are checked only for **self-consistency across repos** — if SDK-A's source obviously implies `idempotent=true` but SDK-B's source obviously implies `idempotent=false`, flag it. Otherwise defer to behavior tier.
 
-5. **Return shape extraction.** Capture the return type from the signature (already extracted in api-extraction Step E.2) AND the success-path return expression(s) (e.g., `return None` vs `return result_obj`). Compare against `### Returns`.
+5. **Return shape extraction.** Capture the return type from the signature (already extracted in api-extraction-protocol Step E.2) AND the success-path return expression(s) (e.g., `return None` vs `return result_obj`). Compare against `### Returns`.
 
 #### Parity Comparison Output
 

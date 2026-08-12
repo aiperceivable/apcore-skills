@@ -74,7 +74,7 @@ Keep context small.
 4. Read `skills/shared/ecosystem.md` when ecosystem discovery, repo grouping, report paths, or version groups are needed.
 5. Read `skills/shared/conventions.md` when naming, language, or repository conventions are needed.
 6. Read `skills/shared/contract-spec.md` when checking or generating `## Contract:` blocks.
-7. Read `skills/shared/api-extraction.md` when extracting API surfaces across languages.
+7. Read `skills/shared/api-extraction-protocol.md` when extracting API surfaces across languages; `skills/shared/api-extraction.md` holds only the comparison tables (E.3/E.4).
 8. Read `skills/shared/conformance-fixtures.md` when tester or release verification needs shared fixtures.
 9. Read `skills/shared/scoring.md` when reports need health scores.
 10. Read `skills/shared/strict-suppression.md` when audit or sync strict/lean behavior is relevant.

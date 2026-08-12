@@ -550,7 +550,7 @@ It DOES check that every SDK agrees on: input validation rules, errors raised an
 side-effect order, return shape, and behavioral properties (async, thread-safe, pure, idempotent, reentrant).
 
 Read `shared/contract-spec.md` for the authoritative Contract block format.
-Read `shared/api-extraction.md` Step E.4b for the per-method contract extraction protocol.
+Read `shared/api-extraction-protocol.md` Step E.4b for the per-method contract extraction protocol.
 
 === Step 1: Load spec Contracts (if doc repo provided) ===
 

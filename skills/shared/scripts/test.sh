@@ -19,6 +19,9 @@ echo "== discover.py --selftest =="
 echo "== score.py --selftest =="
 "$PY" "$HERE/score.py" --selftest
 
+echo "== audit-mechanical.py --selftest =="
+"$PY" "$HERE/audit-mechanical.py" --selftest
+
 echo "== extract-markers.sh (bash -n syntax) =="
 bash -n "$HERE/extract-markers.sh"
 echo "extract-markers.sh syntax: OK"
