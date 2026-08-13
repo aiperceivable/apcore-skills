@@ -24,6 +24,26 @@ Public API surface includes:
 8. **Configuration options** — setting names, types, defaults
 9. **Module definition API** — decorators, binding formats, macros
 
+#### Known gap — extracted but never compared
+
+Three things this protocol extracts have **no comparison rule and no report slot**
+anywhere in sync (checked against Step 4.2's checklist items and the Phase A
+report's `Cross-implementation:` block):
+
+| Extracted by | What is lost |
+|---|---|
+| E.1.6 (generics and trait bounds) | A divergence in generic constraints — e.g. `process<T: Handler + Send>` in one SDK vs `process(item: Handler)` in another — is extracted and then dropped. |
+| E.1.8 (feature-flag-gated items) | A symbol available unconditionally in one SDK but gated behind a build feature in another is not flagged. |
+| E.1 generally | Symbols present in an implementation but absent from the spec ("extra"). The Anti-Rationalization Table says undocumented extras indicate drift, but no checklist item or report line surfaces them. |
+
+This gap predates the split of this file; it was previously recorded only in a
+`Comparison Output Format` section that nothing produced or consumed, which was
+removed. Keep extracting these — the data is correct and cheap once E.1 runs —
+but do not expect them in a report until Step 4.2 grows the matching checklist
+items and the Phase A report grows the matching counters. **Do not delete this
+note as part of a cleanup: it is the only remaining record that the capability is
+half-built.**
+
 #### Extraction Steps
 
 For each SDK repository:

@@ -193,6 +193,10 @@ Noise-Control: {n_warning_consolidated + n_info_nitpick + n_strict_suppressed} s
 {if n_warning_consolidated > 0:} Consolidated root-cause groups: {(file, category) pairs, comma-separated}
 
 Finding ID namespaces:
+  A-EXT-{seq} Phase A extraction-coverage warnings (Step 2 gate — the audit's own
+              reliability, not a defect in the audited repo). A repo carrying one
+              of these has an incomplete extracted surface; its other Phase A
+              counts are lower bounds, not totals.
   A-{seq}     Phase A signature / type / naming findings (Step 4.1–4.3)
   A-S-{seq}   Phase A skeleton findings (Step 4A — only when --internal-check >= skeleton)
   A-C-{seq}   Phase A contract findings (Step 4B — default when --internal-check >= contract)

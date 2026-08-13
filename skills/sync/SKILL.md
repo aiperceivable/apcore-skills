@@ -268,6 +268,18 @@ Spawn one `Agent(subagent_type="general-purpose")` **per implementation repo, al
 
 **Main context retains:** Each repo's structured API summary. Store as `api_summaries[repo_name]`.
 
+**Extraction coverage gate (MANDATORY — before Step 3).** Each sub-agent returns an `EXTRACTION_VERIFICATION` block (Step E.5). Read it; do not skip straight to comparison. Every later phase compares against whatever surface Step 2 produced, so a partial extraction makes the entire Phase A result wrong in a way no downstream check can detect — the symbols simply are not there to be missing.
+
+For each repo, store `extraction_coverage[repo_name]` and act on it:
+
+| Signal | Action |
+|---|---|
+| Module tree or re-export coverage < 100% | Emit WARNING `[A-EXT-{seq}] extraction incomplete for {repo} — {N} of {M} modules scanned; Phase A findings for this repo may be missing symbols`. Continue. |
+| Source-file coverage < 80% | Same WARNING form, citing the file percentage. Continue. |
+| `EXTRACTION_VERIFICATION` block absent entirely | Emit WARNING `[A-EXT-{seq}] sub-agent for {repo} returned no extraction verification — coverage unknown, treat this repo's Phase A results as unverified`. Do NOT silently accept. |
+
+These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch.
+
 ---
 
 ### Step 3: Load Documentation Repo Reference
