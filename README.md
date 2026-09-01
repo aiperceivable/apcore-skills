@@ -9,7 +9,7 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
-| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
+| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
 | `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--no-deep-chain] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
@@ -68,6 +68,12 @@ The apcore ecosystem consists of:
 - **To preserve v0.9 behavior** (Phase A signatures only), pass `--internal-check=none` explicitly: `/apcore-skills:sync --internal-check=none`.
 - **audit D4** now warns when a feature spec's public symbol has no `## Contract:` block. Existing specs without Contract blocks will produce new warnings until filled in.
 - **release Step 2.5** consistency gate is mandatory before version bump. Critical audit/sync findings block release unless explicitly overridden with rationale (logged).
+
+## Performance: Extraction Cache
+
+`sync`'s Step 2 (per-repo API extraction) and Step 4C (per-module deep-chain analysis) cache their sub-agent output under `{ecosystem_root}/.apcore-skills-cache/sync/`, keyed by a content hash of exactly the local files each sub-agent would read (`shared/scripts/extract_cache.py` — purely local, no git, no network). On a repeat run where a repo or module hasn't changed since the last sync, the cached output is reused byte-for-byte instead of re-spawning that sub-agent — this is the main lever for cutting sync's cost on large multi-language, multi-module ecosystems, and it does **not** reduce what gets checked: every symbol and module still gets evaluated, just from cached extraction instead of a fresh one when nothing changed. Cache is on by default; pass `--no-cache` to force a full re-extraction. sync itself keeps the cache directory's `.gitignore` entry current at runtime (see `shared/ecosystem.md` §0.6b).
+
+**Known limitation:** the hash covers file content only — Go's and Swift's versions are git-tag-derived (`ecosystem.md` §0.5), which the cache cannot observe without invoking git (deliberately out of scope). A tag-only version bump with no source change can leave a stale `VERSION:` field in a cached extraction; `sync` never compares versions itself (that's `audit`'s job), so this only affects a cosmetic field, not any finding. To manually wipe a suspect cache directory outright (distinct from a single `--no-cache` run): `python3 skills/shared/scripts/extract_cache.py clear --cache-dir {ecosystem_root}/.apcore-skills-cache/sync`.
 
 ## Consistency Layers
 

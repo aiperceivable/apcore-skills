@@ -79,7 +79,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--strict] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--strict] [--no-cache] [--save]
 ```
 
 | Argument / Flag | Default | Description |
@@ -92,6 +92,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | `--internal-check` | `contract` | Internal consistency tier. `none` = public API only. `contract` = **DEFAULT** — also compare behavioral contracts (inputs validation, errors raised, side-effect order, return shape, properties) via Step 4B, static. `skeleton` = contract + algorithm checkpoint sequences (Step 4A, static, requires source instrumentation). `behavior` = all static tiers + hand off to `tester` skill for runtime behavioral equivalence (Step 7.5, dynamic). Higher tiers include lower tiers. Function-level (helper) identity is intentionally NOT supported — see Anti-Rationalization Table. |
 | `--deep-chain` | `on` | Cross-language deep-chain analysis (Step 4C). When on, the orchestrator spawns one sub-agent **per logical module** and feeds it all N languages' source side-by-side. The sub-agent diffs call graphs, finds missing-validation / missing-registration / defensive-gap divergences that shape-level extraction (4B) cannot see. Forced off when `--internal-check=none`. Set `--deep-chain off` for fast sync (reduces sub-agent count, loses intent-level chain coverage). |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default sync suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), style-only naming nits (lint-suppression-style suggestions), and findings tagged `[verify-spec-first]` (where the recommendation depends on which spec version is authoritative). Pass `--strict` before a release sync when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker`, spec violations, missing API, and chain-level structural divergences (missing-validation / missing-registration / semantic-divergence) always surface regardless. Identical semantics to `apcore-skills:audit --strict` — see `shared/strict-suppression.md`. |
+| `--no-cache` | off (cache on) | Bypass the Step 2 / Step 4C extraction cache (`shared/ecosystem.md` §0.6b) and force every repo/module to re-run its sub-agent even if the cache would have hit. **This trades cost for nothing extra in coverage** — a cache hit is byte-identical to a fresh run for unchanged input, so `--no-cache` does not find anything a cached run would have missed. Use it only to recover from a suspected bad cache entry, or right after editing `references/extract-api-prompt.md` / `references/deep-chain-prompt.md` without bumping their `--extra` version tag. |
 | `--save` | off | Save report to file |
 
 ### Lean vs Strict — when to use which
@@ -167,10 +168,12 @@ Implementation repos contain only code and a README. They do NOT contain PRD/SRS
 5. Reporting — formatting combined results
 
 Parallelism fan-out:
-- **Step 2** — one sub-agent per implementation repo (per-repo, simultaneous) for public API extraction
-- **Step 4C** — one sub-agent per **logical module** (cross-language — each sub-agent reads all N languages' source for its module), dispatched in batches by the orchestrator with bounded concurrency. Progress table is maintained in main context
+- **Step 2** — one sub-agent per **cache-miss** implementation repo (per-repo, simultaneous) for public API extraction. A repo whose relevant source is unchanged since the last run is served from the extraction cache instead — see 2.0.
+- **Step 4C** — one sub-agent per **cache-miss logical module** (cross-language — each sub-agent reads all N languages' source for its module), dispatched in batches by the orchestrator with bounded concurrency. Progress table is maintained in main context. A module whose source + spec Contract are unchanged since the last run is served from the extraction cache instead — see 4C.2.0.
 - **Step 6** — one sub-agent per documentation repo + one per implementation repo (simultaneous) for documentation auditing
 - **Step 10** — one sub-agent per repo with fixable findings (simultaneous)
+
+**Extraction cache (Step 2, Step 4C).** On a repeat sync where most repos/modules haven't changed since the last run, this is the dominant lever for reducing sub-agent count — a re-run of an ecosystem-scale sync (many repos × many modules) can skip the large majority of Step 2/4C sub-agent calls entirely while producing byte-identical results for the unchanged portions. It is lossless (content-hash keyed, `shared/ecosystem.md` §0.6b) and ON by default; pass `--no-cache` only to force a full re-run. This does not reduce what Step 4/4A/4B/6 evaluate — every symbol and module still gets a checklist row and a finding decision, whether the underlying extraction came from a fresh sub-agent or a cache hit.
 
 **Orchestrator progress tracking (Step 4C).** The main context keeps a table `module_progress[module] = {status: pending|in_progress|complete|failed|inconclusive, findings_count, inconclusive_count, assigned_sub_agent_id}`. As each sub-agent returns, the orchestrator updates the row and prints one line: `[4C] {module}: {N} findings ({critical}/{warning}/{info}/{inconclusive})`. If any module comes back `failed` or entirely `inconclusive`, the orchestrator emits a visible warning — a module that cannot be analyzed is itself a risk indicator, not a quiet success.
 
@@ -200,6 +203,7 @@ Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
 - Fix mode
 - Target repos (from positional args, `--scope`, or CWD)
 - **`STRICT_MODE`** — set to `true` if `--strict` appears in `$ARGUMENTS`, else `false`. Pass to the Step 9.0.3 suppression pass and surface in the combined-report header.
+- **`NO_CACHE`** — set to `true` if `--no-cache` appears in `$ARGUMENTS`, else `false`. When `true`, Step 2.0 and Step 4C.2.0 skip the cache `check` call entirely and treat every repo/module as a miss (still writing fresh results back via `put`, so the cache is warm again for the next run).
 
 **Resolution priority:** Positional repo args > `--scope` flag > CWD-based default.
 
@@ -262,13 +266,40 @@ Verify that the documentation repo's feature specs and protocol spec match what 
 
 ### Step 2: Extract Public APIs (Parallel Sub-agents — One per Implementation Repo)
 
-Spawn one `Agent(subagent_type="general-purpose")` **per implementation repo, all simultaneously in a single round of parallel Agent calls**. Each sub-agent extracts the public API from one repo independently. Do NOT process repos sequentially.
+**2.0 Extraction cache (lossless — skip unless `--no-cache`).** Per `shared/ecosystem.md` §0.6b, before spawning any sub-agent, check the extraction cache for each implementation repo in a single fast pass:
+
+```
+python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
+    --kind api --key {repo_name} --repo-dir {repo_path} --lang {language} \
+    --extra "sync-extract-v1"
+```
+
+**Before the first `check`/`put` call of the run:** if `{ecosystem_root}` is (or is inside) a git repo and its `.gitignore` does not already contain `.apcore-skills-cache/` (or a pattern that covers it, e.g. `.apcore-skills-cache`), append that line. Do this once per run, not once per repo — it is the actual point the cache directory gets created, so this is where the ecosystem.md §0.6b guidance must be executed, not just documented.
+
+**If `python3` is unavailable, or `extract_cache.py` errors:** treat every repo as a cache miss and proceed with normal 2.1 sub-agent dispatch — never block sync on the cache being unavailable (same fallback discipline as `discover.py`, `shared/ecosystem.md` §0.1).
+
+For each repo, this returns in well under a second (it hashes local files, no LLM call):
+- `{"status": "hit", "hash": ..., "data": "<cached extraction summary>"}` — treat `data` exactly as if a fresh sub-agent had just returned it. Store into `api_summaries[repo_name]` and print `[Step2] {repo}: cache hit (unchanged since {cached_at}) — extraction skipped`. Do NOT spawn a sub-agent for this repo.
+- `{"status": "miss", "hash": ...}` — no cached entry, or source changed since the last run. Keep `hash` for 2.2; this repo goes into the sub-agent batch below.
+
+`--no-cache` (flag on the `/apcore-skills:sync` command) forces every repo to `miss` — use it to force a full re-extraction (e.g. after suspecting a bad cache entry, or after editing `references/extract-api-prompt.md` without bumping the `--extra` tag).
+
+**2.1** Spawn one `Agent(subagent_type="general-purpose")` **per cache-miss implementation repo, all simultaneously in a single round of parallel Agent calls**. Each sub-agent extracts the public API from one repo independently. Do NOT process repos sequentially. If every repo was a cache hit, skip straight to 2.2's bookkeeping — zero sub-agents needed this run.
 
 **Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`, filling in `{repo_path}` and `{package}` for each repo.
 
-**Main context retains:** Each repo's structured API summary. Store as `api_summaries[repo_name]`.
+**2.2** After each sub-agent returns AND the Extraction coverage gate below has evaluated `extraction_coverage[repo_name]` for it, write the output back to the cache **only if the repo cleared the gate with no coverage WARNING** (module/re-export coverage == 100% AND source-file coverage ≥ 80% AND the `EXTRACTION_VERIFICATION` block is present):
 
-**Extraction coverage gate (MANDATORY — before Step 3).** Each sub-agent returns an `EXTRACTION_VERIFICATION` block (Step E.5). Read it; do not skip straight to comparison. Every later phase compares against whatever surface Step 2 produced, so a partial extraction makes the entire Phase A result wrong in a way no downstream check can detect — the symbols simply are not there to be missing.
+```
+python3 <scripts_dir>/extract_cache.py put --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
+    --kind api --key {repo_name} --hash {hash_from_2.0} --data-file <path-to-file-holding-the-sub-agent's-raw-output>
+```
+
+If a repo's extraction triggered any coverage WARNING, do NOT `put` it — leave the cache entry as-is (miss again next run, giving the repo another independent attempt to reach full coverage rather than freezing a partial result). This mirrors 4C.2.2's "never cache a `failed` module" rule.
+
+**Main context retains:** Each repo's structured API summary (from cache or from a fresh sub-agent — identical downstream handling either way). Store as `api_summaries[repo_name]`.
+
+**Extraction coverage gate (MANDATORY — before Step 3).** Each repo's summary — whether from a fresh sub-agent or a 2.0 cache hit (the cached `data` is the prior sub-agent's verbatim output, coverage block included) — carries an `EXTRACTION_VERIFICATION` block (Step E.5). Read it; do not skip straight to comparison. Every later phase compares against whatever surface Step 2 produced, so a partial extraction makes the entire Phase A result wrong in a way no downstream check can detect — the symbols simply are not there to be missing.
 
 For each repo, store `extraction_coverage[repo_name]` and act on it:
 
@@ -278,7 +309,7 @@ For each repo, store `extraction_coverage[repo_name]` and act on it:
 | Source-file coverage < 80% | Same WARNING form, citing the file percentage. Continue. |
 | `EXTRACTION_VERIFICATION` block absent entirely | Emit WARNING `[A-EXT-{seq}] sub-agent for {repo} returned no extraction verification — coverage unknown, treat this repo's Phase A results as unverified`. Do NOT silently accept. |
 
-These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch.
+These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch. Any repo triggering a row in this table is, per 2.2, **not** written to the cache — it gets a fresh, independent extraction attempt on the next sync run instead of being frozen below the coverage bar indefinitely.
 
 ---
 
@@ -576,7 +607,32 @@ If a feature spec has no corresponding symbols in ≥2 implementations, skip tha
 
 Initialize `module_progress[module_name] = {status: pending, findings_count: 0, inconclusive_count: 0}` for every module.
 
-Dispatch sub-agents in **batches of at most 5 simultaneously** (bounded concurrency — too many parallel sub-agents starve the orchestrator's tool budget). For each batch:
+**4C.2.0 Deep-chain cache (lossless — skip unless `--no-cache`).** Per `shared/ecosystem.md` §0.6b, before dispatching, check every module in one fast pass (no LLM call):
+
+```
+python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
+    --kind deepchain --key {module_name} \
+    --paths {source_files_per_lang flattened to a list} \
+    --extra "sync-deepchain-v1" --extra "{spec_contract text or '(none)'}" --extra "{sorted public_symbols joined}" \
+    --extra "{this module's verified_api rows from Step 4.4, joined}"
+```
+
+The cache key deliberately hashes the module's exact source files **plus** its spec Contract block, symbol list, and verified-API rows — a spec-only edit (no code change) still invalidates the cache, because 4C Step 5 compares against `{spec_contract}` and the sub-agent prompt also receives `{verified_api}` as context (4C.2.1 point 2).
+
+**`sync-deepchain-v1` covers more than the prompt template.** Bump this tag whenever `references/deep-chain-prompt.md` changes **OR** whenever 4C.4's anti-pattern guard rules below change in a way that could alter which sub-agent outputs would pass them — a rule getting stricter must invalidate previously-cached passes exactly as much as a prompt edit would, since a cache hit (see below) does not re-run the guards.
+
+**If `python3` is unavailable, or `extract_cache.py` errors:** treat every module as a cache miss and proceed with normal 4C.2.1 batch dispatch — never block sync on the cache being unavailable.
+
+- `{"status": "hit", ...}` — **before accepting**, parse `data` as JSON and validate it has the same required shape 4C.2.1 point 4 checks (`module`, `findings[]`, `graphs_available_for`, `analyzed_symbols`). This is a local structural check, not another sub-agent call, so it costs nothing to repeat on every hit — a hit is only as trustworthy as the write-time judgment that produced it (4C.2.1's shape check + all of 4C.4's guards), and this is the minimum re-verification that a corrupted or truncated cache entry never gets silently trusted.
+  - **Shape valid:** load `data` directly into this module's results, set `module_progress[module_name].status = complete (cached)`, print `[4C] {module}: cache hit (unchanged since {cached_at}) — analysis skipped`, and remove it from the dispatch list below.
+  - **Shape invalid (malformed JSON, or a required field missing):** treat as a miss — print `[4C] {module}: cache entry failed shape validation, re-running fresh` and route this module into the 4C.2.1 batch dispatch below exactly like an ordinary miss (do not special-case it further; 4C.2.2 will overwrite the corrupt entry with a freshly validated one once the module passes).
+- `{"status": "miss", ...}` — keep `hash` for 4C.2.2; this module goes into the batch dispatch.
+
+Note what this check does **not** re-run: 4C.4's anti-pattern guards (no-silent-success, no-cross-module-leakage, no-shape-only-findings, no-shallow-chains) are LLM judgment calls made once, at the write-time run that produced the cached entry — they are not re-applied on every hit, because doing so would require the same LLM call the cache exists to avoid. This is why the `sync-deepchain-v1` tag bump above matters: it is the mechanism that invalidates a hit when the *standard* those guards enforce changes, since the guards themselves cannot re-run for free.
+
+If every module is a cache hit and all pass shape validation, skip straight to 4C.3 with zero sub-agents spawned this run.
+
+**4C.2.1** Dispatch sub-agents for the remaining (cache-miss) modules in **batches of at most 5 simultaneously** (bounded concurrency — too many parallel sub-agents starve the orchestrator's tool budget). For each batch:
 
 1. Launch `Agent(subagent_type="general-purpose")` for each module in the batch, all in a single round of parallel Agent calls
 2. Each sub-agent uses the template from `@references/deep-chain-prompt.md`, with these variables filled:
@@ -593,9 +649,10 @@ Dispatch sub-agents in **batches of at most 5 simultaneously** (bounded concurre
    - Assign sequential `finding_id` values `A-D-{seq}` to each finding
    - Update `module_progress[module_name]` with the finding counts and set `status = complete` (or `inconclusive` if `inconclusive_count == findings.length` and `findings.length > 0`)
    - Print one progress line: `[4C] {module}: {critical}/{warning}/{info}/{inconclusive} findings — {status}`
-5. When the batch completes, start the next batch until all modules have been dispatched
+   - **4C.2.2** Write the raw JSON payload back to the cache using the `hash` captured in 4C.2.0 for this module: `python3 <scripts_dir>/extract_cache.py put --cache-dir {ecosystem_root}/.apcore-skills-cache/sync --kind deepchain --key {module_name} --hash {hash_from_4C.2.0} --data-file <path-to-file-holding-the-sub-agent's-raw-json>`. Only cache a `complete` or `inconclusive` result — never cache a `failed` module (4C.4's shallow-chain rejection and retries must run fresh every time until the module actually passes).
+5. When the batch completes, start the next batch until all cache-miss modules have been dispatched
 
-Store the flat finding list as `phase_a_deep_chain_results = [finding1, finding2, ...]`.
+Store the flat finding list as `phase_a_deep_chain_results = [finding1, finding2, ...]` (cache hits and fresh results merged, indistinguishable to downstream steps).
 
 ##### 4C.3 Severity Rules
 

@@ -220,6 +220,17 @@ Every skill that produces a report and accepts `--save` MUST use these canonical
 
 If `--save` is passed with an explicit path, use the explicit path verbatim (including relative paths from CWD). The dashboard glob will only find files under `ecosystem_root` matching the pattern — explicit paths are the operator's responsibility to track.
 
+#### 0.6b Canonical Extraction Cache Path
+
+Skills that spawn sub-agents to extract a deterministic summary from unchanged local source (sync's per-repo API extraction and per-module deep-chain analysis are the current consumers) MAY cache the sub-agent's output keyed by a content hash of the exact files it read, via `shared/scripts/extract_cache.py`. A cache hit is **lossless with respect to input** — the hash guarantees the input the sub-agent would see is byte-identical to a prior run, so re-deriving it would produce the same output. That guarantee only holds end-to-end if the consumer also (a) re-validates the cached output's structural shape on every hit — cheap, local, no LLM call — and (b) folds any write-time validation/quality-gate logic (not just the prompt template) into the version tag below, since a hit does not re-run LLM-judgment gates. A consumer that skips either of these is caching "probably fine," not "provably equivalent."
+
+- **Cache root:** `{ecosystem_root}/.apcore-skills-cache/` — sibling to all discovered repos, never inside a single repo's own `.git`. Each consumer uses its own kind sub-directory, e.g. `.apcore-skills-cache/sync/api/`, `.apcore-skills-cache/sync/deepchain/`.
+- **Purely local and offline.** The hash is computed from bytes already on disk (`hashlib.sha256` over sorted `(relpath, content)` pairs). No git invocation, no network access — a dirty working tree is hashed exactly as it sits.
+- **Only cache output that already cleared the consumer's own quality gate.** If the consumer has a coverage/validation gate on a fresh sub-agent's output (e.g. sync's Step 2 extraction-coverage gate, Step 4C's shape check + anti-pattern guards), a `put` MUST happen only for output that passed cleanly — never persist a partial/failed/warned result, or it gets frozen indefinitely instead of getting a fresh independent attempt next run.
+- **Schema-version tag.** Pass a short literal tag (e.g. `"sync-extract-v1"`) via `extract_cache.py check --extra <tag>` so that editing the sub-agent's prompt template — **or the orchestrator's own write-time validation/anti-pattern-guard logic** — invalidates every cached entry without needing to touch source files. Bump the tag whenever `references/extract-api-prompt.md` / `references/deep-chain-prompt.md` changes, or whenever a validation rule tightens, in a way that could change which outputs would now be accepted for the same input.
+- **`.gitignore`.** If `ecosystem_root` itself is (or is inside) a git repo, add `.apcore-skills-cache/` to its `.gitignore` — the cache is a local performance artifact, not something to commit or share. Do this at the actual point a consumer first creates the directory (its first `put` of a run), not only as a documented convention here.
+- See `sync` Step 2 and Step 4C for the concrete check/put call sequence, including the structural re-validation on hit and the coverage/quality gate on write.
+
 #### 0.7 Store Ecosystem Context
 
 Track resolved values for subsequent steps:

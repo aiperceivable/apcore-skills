@@ -21,6 +21,7 @@ Each script has an authoritative markdown spec it mirrors. The markdown is the
 | `score.py` | `shared/scoring.md` | audit Step 3, release Step 2.5 gate, `/apcore-skills` dashboard |
 | `extract-markers.sh` | `shared/api-extraction-protocol.md` §E.4a | sync Step 4A / Step 2 marker grep |
 | `audit-mechanical.py` | `audit/references/dimension-prompts.md` D2, D3, D6, D7, D8 | audit Step 2a — replaces **five** per-dimension sub-agents with one call |
+| `extract_cache.py` | `shared/ecosystem.md` §0.6b | sync Step 2.0/2.2 (API extraction) and Step 4C.2.0/4C.2.2 (deep-chain) — skips a sub-agent entirely on an unchanged-input cache hit |
 
 **A skill should:** try the script, parse its JSON/stdout; if Python/bash is
 unavailable, the script errors, or output looks wrong, fall back to executing the
@@ -53,6 +54,12 @@ skills/shared/scripts/extract-markers.sh /path/to/apcore-python/src
 python3 skills/shared/scripts/audit-mechanical.py --root /path/to/ecosystem
 python3 skills/shared/scripts/audit-mechanical.py --only D3,D8      # subset
 python3 skills/shared/scripts/audit-mechanical.py --repos apcore-python,django-apcore
+
+# sync's extraction cache — check/put are called by sync itself (Step 2 / 4C).
+# `clear` is the manual recovery path if a cache directory is ever suspected
+# corrupt or stale beyond what a single `--no-cache` run should fix:
+python3 skills/shared/scripts/extract_cache.py clear --cache-dir /path/to/ecosystem/.apcore-skills-cache/sync
+python3 skills/shared/scripts/extract_cache.py clear --cache-dir /path/to/ecosystem/.apcore-skills-cache/sync --kind deepchain
 ```
 
 ### Why `audit-mechanical.py` does not carry the Suppression Gate
@@ -91,8 +98,10 @@ skills/shared/scripts/test.sh
 
 It runs `discover.py --selftest` (name→type classification + every version-string
 parser), `score.py --selftest` (every formula, gate precedence, unrounded-boundary
-behavior), and a `bash -n` syntax check on `extract-markers.sh` (plus `shellcheck`
-when present). CI runs the **same command** on changes to `skills/shared/**`
+behavior), `audit-mechanical.py --selftest`, `extract_cache.py --selftest` (hash
+stability, exclusion list, `--extra` participation, check/put/clear round-trip),
+and a `bash -n` syntax check on `extract-markers.sh` (plus `shellcheck` when
+present). CI runs the **same command** on changes to `skills/shared/**`
 (`.github/workflows/scripts.yml`), so local and CI never diverge.
 
 Run it after editing either a script **or** its companion markdown table. If a
