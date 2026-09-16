@@ -65,7 +65,9 @@ Internal skeleton (--internal-check >= skeleton):
   Methods with no instrumentation: {N}
 
 Cross-language deep-chain (--deep-chain=on — DEFAULT):
+  Scope: {all modules | RESTRICTED by --modules to: {analyzed}; excluded: {excluded}}
   Modules analyzed: {N}
+  Modules skipped (source files unresolved): {N}
   Modules complete: {N}  failed: {N}  inconclusive: {N}
   Findings: critical {N} / warning {N} / info {N} / inconclusive {N}
   Top finding types:
@@ -201,6 +203,11 @@ Finding ID namespaces:
   A-S-{seq}   Phase A skeleton findings (Step 4A — only when --internal-check >= skeleton)
   A-C-{seq}   Phase A contract findings (Step 4B — default when --internal-check >= contract)
   A-D-{seq}   Phase A deep-chain findings (Step 4C — default when --deep-chain=on)
+  A-DS-{seq}  Phase A deep-chain SCOPE notices (Step 4C.1 / 4C.1b — modules skipped
+              for unresolved source files, partial-language coverage, --modules
+              narrowing). Like A-EXT-, these describe the audit's own coverage, not a
+              defect in the audited repo, and they are exempt from §5's mandatory
+              deep-chain finding shape because they cite no symbol or evidence.
   B-{seq}     Phase B documentation findings (Steps 6–8)
   All IDs are stable within a single run; regenerated per invocation.
 
@@ -228,7 +235,8 @@ Internal skeleton (--internal-check >= skeleton):
   (omitted entirely if --internal-check=none or --internal-check=contract, or if no spec skeletons defined)
 
 Cross-language deep-chain (--deep-chain=on — DEFAULT):
-  Modules: {N} analyzed | {N} complete | {N} failed | {N} inconclusive
+  Scope: {all modules | RESTRICTED by --modules to: {analyzed}; excluded: {excluded}}
+  Modules: {N} analyzed | {N} complete | {N} failed | {N} inconclusive | {N} skipped (files unresolved)
   Findings: critical {N} | warning {N} | info {N} | inconclusive {N}
   By type: semantic-divergence {N} | missing-validation {N} | missing-registration {N} |
            defensive-gap {N} | error-path-divergence {N} | contract-gap {N}
@@ -282,12 +290,21 @@ INFO:
     ├─ signature/type/naming (A-): {n}
     ├─ contract (A-C-): {n}
     ├─ skeleton (A-S-): {n}
-    └─ deep-chain (A-D-): {n}
+    ├─ deep-chain (A-D-): {n}
+    └─ coverage/scope notices (A-EXT-, A-DS-): {n}
   Phase B: {N} findings (critical: {n}, warning: {n}, info: {n})
   Total: {N} findings
   Contradictions (doc internal): {N}
   Contradictions (cross-repo): {N}
 ```
+
+**The `Scope:` line on the deep-chain section is MANDATORY whenever that section
+renders** (same in §1). A `--modules`-filtered run and a full run produce
+structurally identical sections, so without it a reader cannot distinguish "no
+divergences across the ecosystem" from "no divergences in the two modules we
+happened to look at". Render it from `deep_chain_scope` (Step 4.4). Same
+reasoning as §5's mandatory `Verification:` line: a finding is only as good as
+its disclosed scope.
 
 ---
 

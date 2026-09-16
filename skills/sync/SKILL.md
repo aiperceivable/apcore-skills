@@ -61,6 +61,9 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | "Trait satisfaction is a Rust thing, skip it for other languages" | Every language has an equivalent: Python `__str__` / TS `toString()` / Go `String()` / Rust `impl Display`. The protocol spec defines required interface contracts; each language must satisfy them with its idiomatic mechanism. Build a dedicated checklist row. |
 | "Multiple constructors are language-specific sugar" | Rust's `Self::new()` / `Self::with_config()` / `Self::from_env()` corresponds to Python `classmethod` factories, TS static factories, Go `NewX` / `NewXFromY`. If the spec defines multiple construction paths, every language must expose all of them. Treat constructors as a list, not a single entry. |
 | "Contract extraction (4B) already catches intent divergence, deep-chain is redundant" | NO. 4B's sub-agent is **one-per-repo doing shape extraction** — it lists `inputs/errors/side_effects` as declared fields. It cannot see bugs that only appear when you read the code: bare dict subscripts that throw `KeyError` on malformed input, internal methods that silently skip validation, functions that fail to update a map the peer language updates. These are visible in the AST, not in the contract shape. Step 4C reads all N languages' source for one module **side-by-side** and diffs the call graphs — that is how the `_discover_custom` / `discover_internal` / `for...of null` class of bugs get caught. |
+| "4C spawns one sub-agent per module — one per *language* would be far cheaper" | NO, and it would delete the mechanism. A single-language sub-agent has no peer to diff against, so it can only return call graphs; the N-way diff then has to happen in the main context, which means M×N graphs land there instead of a handful of findings. The token math also does not work: total source read is M modules × N languages either way — slicing the same rectangle by language instead of by module does not shrink it. You would save M−N prompt-template instantiations and pay for it with the orchestrator's context. If 4C costs too much, cut **M** with `--modules` (4C.1b), cut **N** with `--lang`, or turn it off with `--deep-chain=off`. |
+| "The module's source file is obvious from its name — I'll just use `src/{module}.py`" | NO. Use `FILE_MAP` from Step 2 (4C.1 step 2). A guessed path that is wrong does not fail loudly: the sub-agent reads *some* valid file, builds well-formed graphs, writes plausible `confidence_notes`, and reports zero divergences. Every 4C.4 guard passes. The module is then reported as analyzed and clean while its actual source was never opened. A missing mapping must degrade visibly (unresolved → WARNING), never silently resolve to a plausible-looking path. |
+| "`--modules` narrows 4C, so narrowing Step 4 the same way would save even more" | NO — see 4C.1b. Step 4 produces `verified_api`, which Phase B consumes as the authority on what the API *is*. Narrow Step 4 and every doc referencing an uncompared symbol becomes a false finding against the docs, with nothing in the report indicating why. 4C is safe to narrow precisely because nothing downstream consumes it as truth. |
 | "A sub-agent that reports 'no issues' means the module is lazy" | Zero findings IS a valid outcome — when backed by evidence. Sub-agents must cite `file:line:snippet` for every claim, including negative claims (e.g., "checked the validation path — `registry.py:L45-L52` performs the same guard as peers, no divergence"). The orchestrator rejects reports without evidence citations, NOT reports with zero findings. Do not fabricate low-severity findings to avoid an empty report. When evidence is genuinely ambiguous, emit `inconclusive` with a reason, not a made-up finding. |
 | "I found 0 issues in this dimension — I should report *something* to avoid looking lazy" | No. Quota-filling is the primary source of false positives in this skill. A dimension returning `FINDING_COUNT: 0` with a short "what I checked" note is a cleaner signal than a padded one. If unsure, use `inconclusive` — never invent. |
 | "The input could *theoretically* be malformed, so this is a security bug" | If the input source is internal/trusted (project's own files, hard-coded constants, type-checked internal calls, dev-local scanner output), this is not a security finding. Trust-boundary test: is the input source genuinely external (network, untrusted user, cross-trust-boundary file upload)? If not, drop or downgrade to warning. Speculative attacker scenarios on internal data flow are noise. |
@@ -79,7 +82,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--strict] [--no-cache] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--strict] [--no-cache] [--save]
 ```
 
 | Argument / Flag | Default | Description |
@@ -91,6 +94,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | `--lang` | all discovered | Comma-separated list of languages to compare |
 | `--internal-check` | `contract` | Internal consistency tier. `none` = public API only. `contract` = **DEFAULT** — also compare behavioral contracts (inputs validation, errors raised, side-effect order, return shape, properties) via Step 4B, static. `skeleton` = contract + algorithm checkpoint sequences (Step 4A, static, requires source instrumentation). `behavior` = all static tiers + hand off to `tester` skill for runtime behavioral equivalence (Step 7.5, dynamic). Higher tiers include lower tiers. Function-level (helper) identity is intentionally NOT supported — see Anti-Rationalization Table. |
 | `--deep-chain` | `on` | Cross-language deep-chain analysis (Step 4C). When on, the orchestrator spawns one sub-agent **per logical module** and feeds it all N languages' source side-by-side. The sub-agent diffs call graphs, finds missing-validation / missing-registration / defensive-gap divergences that shape-level extraction (4B) cannot see. Forced off when `--internal-check=none`. Set `--deep-chain off` for fast sync (reduces sub-agent count, loses intent-level chain coverage). |
+| `--modules` | all enumerated | Restrict **Step 4C only** to the named logical modules (comma-separated, matched against feature-spec module names — `registry`, `executor`, ...). This is the direct lever on 4C cost: 4C spawns one sub-agent per module, so cutting the module list cuts the dominant fan-out proportionally. It deliberately does **not** narrow Step 4 / 4A / 4B / Phase B — those stay full-surface, because a partial public-API comparison would silently corrupt `verified_api`, which Phase B consumes as truth. See 4C.1b. |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default sync suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), style-only naming nits (lint-suppression-style suggestions), and findings tagged `[verify-spec-first]` (where the recommendation depends on which spec version is authoritative). Pass `--strict` before a release sync when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker`, spec violations, missing API, and chain-level structural divergences (missing-validation / missing-registration / semantic-divergence) always surface regardless. Identical semantics to `apcore-skills:audit --strict` — see `shared/strict-suppression.md`. |
 | `--no-cache` | off (cache on) | Bypass the Step 2 / Step 4C extraction cache (`shared/ecosystem.md` §0.6b) and force every repo/module to re-run its sub-agent even if the cache would have hit. **This trades cost for nothing extra in coverage** — a cache hit is byte-identical to a fresh run for unchanged input, so `--no-cache` does not find anything a cached run would have missed. Use it only to recover from a suspected bad cache entry, or right after editing `references/extract-api-prompt.md` / `references/deep-chain-prompt.md` without bumping their `--extra` version tag. |
 | `--save` | off | Save report to file |
@@ -203,6 +207,7 @@ Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
 - Fix mode
 - Target repos (from positional args, `--scope`, or CWD)
 - **`STRICT_MODE`** — set to `true` if `--strict` appears in `$ARGUMENTS`, else `false`. Pass to the Step 9.0.3 suppression pass and surface in the combined-report header.
+- **`MODULE_FILTER`** — the comma-split list given to `--modules`, else `null` (meaning "all modules"). Consumed only by Step 4C.1. Validate the names there, not here — the set of valid module names is not known until the doc repo's feature specs have been read in Step 3.
 - **`NO_CACHE`** — set to `true` if `--no-cache` appears in `$ARGUMENTS`, else `false`. When `true`, Step 2.0 and Step 4C.2.0 skip the cache `check` call entirely and treat every repo/module as a miss (still writing fresh results back via `put`, so the cache is warm again for the next run).
 
 **Resolution priority:** Positional repo args > `--scope` flag > CWD-based default.
@@ -271,8 +276,10 @@ Verify that the documentation repo's feature specs and protocol spec match what 
 ```
 python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
     --kind api --key {repo_name} --repo-dir {repo_path} --lang {language} \
-    --extra "sync-extract-v1"
+    --extra "sync-extract-v2"
 ```
+
+**Tag history.** `sync-extract-v2` supersedes `sync-extract-v1`: the extraction output gained the mandatory `FILE_MAP` section (`references/extract-api-prompt.md`), so every `v1` entry lacks a field Step 4C.1 now depends on. The bump is what forces those entries to be re-extracted instead of being served as structurally-valid-but-incomplete hits — 2.0's hit path does not validate individual fields.
 
 **Before the first `check`/`put` call of the run:** if `{ecosystem_root}` is (or is inside) a git repo and its `.gitignore` does not already contain `.apcore-skills-cache/` (or a pattern that covers it, e.g. `.apcore-skills-cache`), append that line. Do this once per run, not once per repo — it is the actual point the cache directory gets created, so this is where the ecosystem.md §0.6b guidance must be executed, not just documented.
 
@@ -288,7 +295,7 @@ For each repo, this returns in well under a second (it hashes local files, no LL
 
 **Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`, filling in `{repo_path}` and `{package}` for each repo.
 
-**2.2** After each sub-agent returns AND the Extraction coverage gate below has evaluated `extraction_coverage[repo_name]` for it, write the output back to the cache **only if the repo cleared the gate with no coverage WARNING** (module/re-export coverage == 100% AND source-file coverage ≥ 80% AND the `EXTRACTION_VERIFICATION` block is present):
+**2.2** After each sub-agent returns AND the Extraction coverage gate below has evaluated `extraction_coverage[repo_name]` for it, write the output back to the cache **only if the repo cleared the gate with no coverage WARNING** (module/re-export coverage == 100% AND source-file coverage ≥ 80% AND the `EXTRACTION_VERIFICATION` block is present AND the `FILE_MAP` section is present):
 
 ```
 python3 <scripts_dir>/extract_cache.py put --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
@@ -308,8 +315,13 @@ For each repo, store `extraction_coverage[repo_name]` and act on it:
 | Module tree or re-export coverage < 100% | Emit WARNING `[A-EXT-{seq}] extraction incomplete for {repo} — {N} of {M} modules scanned; Phase A findings for this repo may be missing symbols`. Continue. |
 | Source-file coverage < 80% | Same WARNING form, citing the file percentage. Continue. |
 | `EXTRACTION_VERIFICATION` block absent entirely | Emit WARNING `[A-EXT-{seq}] sub-agent for {repo} returned no extraction verification — coverage unknown, treat this repo's Phase A results as unverified`. Do NOT silently accept. |
+| `FILE_MAP` section absent entirely | Emit WARNING `[A-EXT-{seq}] extraction for {repo} returned no FILE_MAP — Step 4C cannot route any of this repo's symbols to a sub-agent`. **Blocks caching** (2.2): a missing section means the sub-agent skipped the work, and a fresh attempt may well succeed. Continue — Step 4C.1 degrades per-module (see 4C.1 step 2), it does not abort. |
+| `FILE_MAP` present but some symbols listed as `(unresolved)` | Emit WARNING `[A-EXT-{seq}] {N} of {M} symbols in {repo} have no resolvable defining file ({symbols}) — Step 4C will under-report divergences for them`. **Does NOT block caching.** An unresolvable symbol (generated code, dynamic registration) is usually a permanent property of the source, not a transient extraction failure; blocking the cache on it would re-spawn this repo's sub-agent on every run forever while changing nothing. The warning still surfaces on each cache hit, because the gate re-reads the cached `EXTRACTION_VERIFICATION` block. |
+| A `FILE_MAP` path does not exist on disk | Emit WARNING `[A-EXT-{seq}] FILE_MAP for {repo} cites {path}, which does not exist — treating the symbols on that line as unresolved`. Drop the line rather than passing a bad path to Step 4C. This is a cheap local `test -f`, not a sub-agent call; run it for every path. |
 
-These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch. Any repo triggering a row in this table is, per 2.2, **not** written to the cache — it gets a fresh, independent extraction attempt on the next sync run instead of being frozen below the coverage bar indefinitely.
+These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch.
+
+**Which rows block caching.** Every row above except `(unresolved)` symbols is, per 2.2, **not** written to the cache — the repo gets a fresh, independent extraction attempt next run instead of being frozen below the coverage bar. The `(unresolved)` row is the deliberate exception: re-running cannot resolve a symbol that has no static definition site, so blocking its cache entry would buy a permanent per-run sub-agent for zero improvement. The distinction is *can a retry plausibly fix this* — not *is this a warning*.
 
 ---
 
@@ -598,10 +610,35 @@ Step 4C fills this gap by dispatching **one sub-agent per logical module** that 
 Derive the list of logical modules to analyze. Each module corresponds to one `## Feature:` block in the documentation repo (i.e., one file under `{doc_repo}/docs/features/*.md`). For each feature spec file:
 
 1. Parse the frontmatter / heading to extract the logical module name (e.g., `registry`, `executor`, `config`, `middleware`)
-2. From `api_summaries[repo_name]` (Step 2 output), locate the source file(s) in each impl repo that contain the symbols belonging to that module. The mapping is: module name → set of symbols → set of source files per language.
+2. Resolve **module name → symbols → source files per language**:
+   - *module → symbols*: the public symbols the feature spec declares, i.e. this module's slice of `spec_api[scope]` from Step 3.
+   - *symbols → files, per impl repo*: look each symbol up in that repo's `FILE_MAP` (Step 2 output — the serialized `source_file` field, see `shared/api-extraction-protocol.md` Step E.2). Union the resulting paths into `source_files_per_lang[lang]`.
+
+   **Resolve, never guess.** `FILE_MAP` is the only sanctioned source for this mapping. Do NOT infer a path from the module name (`registry` → `src/registry.py`), from `module_path` (a *logical* path like `crate::registry`, not a file), or by globbing the repo. A guessed path that happens to be wrong hands the sub-agent the wrong source, and a sub-agent reading the wrong file reports zero divergences — a clean-looking false negative, which is precisely what Step 4C exists to prevent. 4C.4's guards do not catch this: `confidence_notes` will be non-empty and the graphs will be well-formed, just of the wrong code.
+
+   **Per-language degradation.** If a symbol is absent from a repo's `FILE_MAP`, or maps to `(unresolved)` (equivalently, a `source_file` of `null` — the two are the same state in different serializations, see `shared/api-extraction-protocol.md` Step E.2), drop that symbol from that language's set and record it in `unresolved_symbols[module][lang]`. Do not substitute a guess and do not drop it silently.
 3. Store as `modules_to_analyze = [{module_name, public_symbols, source_files_per_lang, spec_contract_block}]`
 
-If a feature spec has no corresponding symbols in ≥2 implementations, skip that module (already flagged by Step 4.3 as missing-implementation).
+**Module-level skip conditions** — each emits a finding, none is silent. They use the **`A-DS-`** namespace (deep-chain scope), not `A-D-`: an `A-D-` finding is a divergence found by a sub-agent and must render with `Module / Symbol / Divergence / Evidence / Recommendation / Verification: static-inference` (`references/report-formats.md` §5). These are orchestrator notices about *what was not analyzed* — they have no symbol, no per-language evidence and no static inference to verify, so filing them as `A-D-` would either break that mandatory shape or pad it with empty fields.
+
+
+| Condition | Action |
+|---|---|
+| Feature spec has no corresponding symbols in ≥2 implementations | Skip the module. Already flagged by Step 4.3 as missing-implementation; no new finding. |
+| `source_files_per_lang` resolved for < 2 languages (symbols exist but files could not be resolved) | Skip the module and emit WARNING `[A-DS-{seq}] deep-chain skipped for module {M} — source files resolved for only {N} language(s) ({langs}); unresolved: {unresolved_symbols[M]}`. A module dropped for this reason must never be counted as "analyzed, 0 findings" in the Step 5 report. |
+| Some (but ≥2) languages resolved | Analyze the module across the languages that did resolve, and emit INFO `[A-DS-{seq}] deep-chain for module {M} covered {resolved_langs} only — {missing_langs} excluded, unresolved symbols: {…}`. Partial coverage is useful; undisclosed partial coverage is not. |
+
+##### 4C.1b Apply `--modules` Filter
+
+If `MODULE_FILTER` is `null`, skip this substep — every enumerated module proceeds.
+
+Otherwise:
+
+1. **Validate first.** For each name in `MODULE_FILTER`, check it against the module names enumerated in 4C.1. An unknown name is an error, not a no-op: abort with `"Module '{name}' not found. Modules in scope: {enumerated names}"`. Silently analyzing nothing because of a typo is the worst outcome here — it produces an empty, clean-looking 4C section.
+2. **Filter.** `modules_to_analyze = [m for m in modules_to_analyze if m.module_name in MODULE_FILTER]`.
+3. **Record the narrowing.** Set `deep_chain_scope = {filtered: true, analyzed: […], excluded: […]}` and emit INFO `[A-DS-{seq}] deep-chain restricted by --modules to {analyzed} — {N} module(s) excluded: {excluded}`. Step 5 / Step 9 render this on the deep-chain section header so that a filtered run can never be mistaken for a full one.
+
+**The filter narrows Step 4C only.** Steps 4 / 4A / 4B and both Phase B steps still run against the full symbol surface. Narrowing them would make `verified_api` (Step 4.4) a partial record of the API, and Phase B consumes `verified_api` as truth — a doc referencing a symbol that was simply never compared would be reported as an error against the docs. The cheap-looking generalization of this flag is the dangerous one; do not extend it.
 
 ##### 4C.2 Orchestrate Per-Module Sub-agents
 
@@ -613,13 +650,15 @@ Initialize `module_progress[module_name] = {status: pending, findings_count: 0, 
 python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
     --kind deepchain --key {module_name} \
     --paths {source_files_per_lang flattened to a list} \
-    --extra "sync-deepchain-v1" --extra "{spec_contract text or '(none)'}" --extra "{sorted public_symbols joined}" \
+    --extra "sync-deepchain-v2" --extra "{spec_contract text or '(none)'}" --extra "{sorted public_symbols joined}" \
     --extra "{this module's verified_api rows from Step 4.4, joined}"
 ```
 
 The cache key deliberately hashes the module's exact source files **plus** its spec Contract block, symbol list, and verified-API rows — a spec-only edit (no code change) still invalidates the cache, because 4C Step 5 compares against `{spec_contract}` and the sub-agent prompt also receives `{verified_api}` as context (4C.2.1 point 2).
 
-**`sync-deepchain-v1` covers more than the prompt template.** Bump this tag whenever `references/deep-chain-prompt.md` changes **OR** whenever 4C.4's anti-pattern guard rules below change in a way that could alter which sub-agent outputs would pass them — a rule getting stricter must invalidate previously-cached passes exactly as much as a prompt edit would, since a cache hit (see below) does not re-run the guards.
+**`sync-deepchain-v2` supersedes `v1`** because `references/deep-chain-prompt.md` now passes multiple file paths per language (4C.1's `FILE_MAP` resolution) instead of one; a `v1` entry was produced by a sub-agent that may have read only the first file.
+
+**`sync-deepchain-v2` covers more than the prompt template.** Bump this tag whenever `references/deep-chain-prompt.md` changes **OR** whenever 4C.4's anti-pattern guard rules below change in a way that could alter which sub-agent outputs would pass them — a rule getting stricter must invalidate previously-cached passes exactly as much as a prompt edit would, since a cache hit (see below) does not re-run the guards.
 
 **If `python3` is unavailable, or `extract_cache.py` errors:** treat every module as a cache miss and proceed with normal 4C.2.1 batch dispatch — never block sync on the cache being unavailable.
 
@@ -628,7 +667,7 @@ The cache key deliberately hashes the module's exact source files **plus** its s
   - **Shape invalid (malformed JSON, or a required field missing):** treat as a miss — print `[4C] {module}: cache entry failed shape validation, re-running fresh` and route this module into the 4C.2.1 batch dispatch below exactly like an ordinary miss (do not special-case it further; 4C.2.2 will overwrite the corrupt entry with a freshly validated one once the module passes).
 - `{"status": "miss", ...}` — keep `hash` for 4C.2.2; this module goes into the batch dispatch.
 
-Note what this check does **not** re-run: 4C.4's anti-pattern guards (no-silent-success, no-cross-module-leakage, no-shape-only-findings, no-shallow-chains) are LLM judgment calls made once, at the write-time run that produced the cached entry — they are not re-applied on every hit, because doing so would require the same LLM call the cache exists to avoid. This is why the `sync-deepchain-v1` tag bump above matters: it is the mechanism that invalidates a hit when the *standard* those guards enforce changes, since the guards themselves cannot re-run for free.
+Note what this check does **not** re-run: 4C.4's anti-pattern guards (no-silent-success, no-cross-module-leakage, no-shape-only-findings, no-shallow-chains) are LLM judgment calls made once, at the write-time run that produced the cached entry — they are not re-applied on every hit, because doing so would require the same LLM call the cache exists to avoid. This is why the `sync-deepchain-v2` tag bump above matters: it is the mechanism that invalidates a hit when the *standard* those guards enforce changes, since the guards themselves cannot re-run for free.
 
 If every module is a cache hit and all pass shape validation, skip straight to 4C.3 with zero sub-agents spawned this run.
 
@@ -638,7 +677,7 @@ If every module is a cache hit and all pass shape validation, skip straight to 4
 2. Each sub-agent uses the template from `@references/deep-chain-prompt.md`, with these variables filled:
    - `{module_name}` — the logical module
    - `{repos}` — list of implementation repo names
-   - `{source_files}` — map of `{lang: file_path}` for this module
+   - `{source_files}` — map of `{lang: [file_path, ...]}` for this module, exactly as resolved from `FILE_MAP` in 4C.1 step 2. A language whose files did not resolve is omitted from the map, not passed as an empty list.
    - `{public_symbols}` — the list of public symbols (from Step 4.1 / `spec_api`) scoped to this module
    - `{verified_api}` — the per-repo verified signature rows for this module (so the sub-agent does NOT re-verify signatures — that is Step 4's job)
    - `{spec_contract}` — the `## Contract:` block from the feature spec if present; else empty
@@ -681,8 +720,9 @@ See **§5 Deep-chain finding render** in `@references/report-formats.md`.
 Store the full evaluated checklist as `phase_a_results`:
 - `verified_api` — the spec-defined API surface with per-symbol verification status from implementations. Definition: the union of all symbols from the spec, annotated with which implementations have them and whether they match. For PASS symbols, the spec definition is confirmed correct. For FAIL symbols, the spec definition is still authoritative (implementations are wrong).
 - `checklist` — every item with its PASS/FAIL/WARN status
-- `findings` — structured list of all failures with severity. This list is the UNION of Steps 4.1–4.3 (namespace `A-`), 4A (namespace `A-S-`), 4B (namespace `A-C-`), and 4C (namespace `A-D-`). All four namespaces share the same finding schema (`finding_id`, `severity`, `symbol`, `location`, `fix_hint`), and Step 4C findings additionally carry `type`, `evidence.{lang}`, `verification: "static-inference"`
+- `findings` — structured list of all failures with severity. This list is the UNION of Steps 4.1–4.3 (namespace `A-`), 4A (namespace `A-S-`), 4B (namespace `A-C-`), and 4C (namespace `A-D-`), plus the two coverage/scope namespaces that describe the audit's own reach rather than a repo defect: `A-EXT-` (Step 2 extraction gate) and `A-DS-` (Step 4C.1 / 4C.1b scope notices). All four namespaces share the same finding schema (`finding_id`, `severity`, `symbol`, `location`, `fix_hint`), and Step 4C findings additionally carry `type`, `evidence.{lang}`, `verification: "static-inference"`
 - `module_progress` — per-module deep-chain orchestrator state (status + counts) from Step 4C, kept for the Phase A report and for the orchestrator to surface failed/inconclusive modules as visible warnings. Does NOT feed into Phase B directly.
+- `deep_chain_scope` — `{filtered, analyzed[], excluded[]}` from Step 4C.1b, plus the modules skipped for unresolved source files (4C.1). Steps 5 and 9 render it on the deep-chain section's `Scope:` line. Does NOT feed into Phase B — Phase B always sees the full `verified_api`, by design (4C.1b).
 
 This `verified_api` becomes the input truth for Phase B. When injecting into Phase B sub-agent prompts, format as:
 ```

@@ -22,13 +22,44 @@ replacement. In particular:
 
 Then follow this checklist:
 
-1. Read the main export file:
-   - Python: src/{package}/__init__.py — extract all imports and __all__
-   - TypeScript: src/index.ts — extract all export statements
+1. Read the main export file (the crate/package root — the entry point every
+   public symbol must be reachable from):
+   - **Python**: `src/{package}/__init__.py` — extract `__all__`, or all non-underscore
+     imports when `__all__` is absent. Follow `from .submodule import X` chains to
+     the definition (protocol Step E.1, Python).
+   - **TypeScript**: `src/index.ts` — extract every `export` statement, then resolve
+     `export * from './mod'` and `export { X } from './mod'` re-export chains to the
+     defining module (protocol Step E.1, TypeScript).
+   - **Rust**: `src/lib.rs` — the crate root. This is the deepest of the three and
+     the one most often under-extracted: you must walk the **module tree** (E.1.1 —
+     every `mod foo;` resolves to `src/foo.rs` *or* `src/foo/mod.rs`, recursively),
+     resolve **every `pub use`** including glob (`pub use auth::*`) and renamed
+     (`pub use auth::Config as AuthConfig`) forms (E.1.2), and apply the visibility
+     table (E.1.5 — `pub(crate)` / `pub(super)` are NOT public API). A Rust crate's
+     public surface is "everything reachable via `pub use` from `lib.rs`, plus direct
+     `pub` items in `lib.rs`" — reading `lib.rs` alone and stopping is the classic
+     partial extraction, and it fails silently because `lib.rs` looks complete.
+
+   These three are the languages currently in scope. If you are pointed at a repo in
+   another language, follow the matching `##### {Language}` section of protocol Step
+   E.1 rather than guessing an analogue of the above.
 
 2. For each exported symbol, read its source file and extract:
    - Kind: class | function | type | enum | constant | interface
    - Name (in this language's convention)
+   - **`source_file` (MANDATORY)** — the repo-root-relative path of the file where
+     the symbol is *defined*. You already open that file in this step; record the
+     path instead of discarding it. Follow re-exports to the definition — never
+     record the barrel file (`__init__.py`, `index.ts`, `lib.rs`) unless the symbol
+     is genuinely defined there. See `shared/api-extraction-protocol.md` Step E.2
+     for why this field is not optional.
+
+     Per language, the definition site is the end of the re-export chain, not its start:
+     | Language | Barrel (do NOT record) | Record instead |
+     |---|---|---|
+     | Python | `src/{package}/__init__.py` | the module the `from .x import Y` chain ends at, e.g. `src/apcore/registry/registry.py` |
+     | TypeScript | `src/index.ts` | the module the `export {…} from './x'` chain ends at, e.g. `src/registry/registry.ts` |
+     | Rust | `src/lib.rs` | the file the `pub use` resolves to — `src/registry.rs` **or** `src/registry/mod.rs`, whichever actually exists (E.1.1). For `pub use auth::Config as AuthConfig`, record where `Config` is defined, not where it is renamed. |
    - For classes: constructor params (name, type, required, default), all public methods with full signatures
    - For functions: params (name, type, required, default), return type, async flag
    - For enums: all member names and values
@@ -93,6 +124,24 @@ ERRORS:
 CONSTANTS:
 - {NAME}: {type} = {value}
 
+FILE_MAP:
+- {repo-root-relative-path}: {Symbol1}, {Symbol2}, ...
+- {repo-root-relative-path}: {Symbol3}, ...
+
+`FILE_MAP` is the serialized form of every symbol's `source_file` field, grouped
+by file so that symbols sharing a file cost one path instead of many. **It is
+mandatory and must cover every top-level symbol listed above** — classes,
+functions, enums, types, errors and constants alike. A symbol appearing in
+`CLASSES:` but not in any `FILE_MAP` line is an incomplete extraction, not a
+stylistic choice.
+
+If a symbol's defining file genuinely cannot be determined (generated code,
+dynamic registration), list it under the literal path `(unresolved)` rather than
+guessing a plausible path. `(unresolved)` here is the text-format spelling of the
+protocol's `"source_file": null` — same state, two serializations. A wrong path is worse than a missing one: it sends
+sync's Step 4C sub-agent to the wrong source, which then reports no divergence
+and looks like a clean pass.
+
 Extraction verification (Step E.5 — MANDATORY before returning):
 
 Run the E.5 checks from `shared/api-extraction-protocol.md` and append the result
@@ -106,6 +155,7 @@ EXTRACTION_VERIFICATION:
   Re-exports: {N}/{N} chains resolved ({pct}%)
   Files: {N}/{N} source files read ({pct}%)
   Symbols: {N} public items ({avg} per file)
+  Source files: {N}/{N} symbols mapped to a defining file ({pct}%)
   Trait impls: {N} traits defined, {N} impl blocks found
 ```
 
@@ -114,4 +164,4 @@ Error handling:
 - If the main export file is missing or empty, return: REPO: {repo-name}, STATUS: NO_EXPORTS, REASON: {description}
 - If individual source files cannot be read, skip them and note in the summary
 
-Keep the summary concise but complete. Target ~3-5KB.
+Keep the summary concise but complete. Target ~3-6KB (`FILE_MAP` is grouped by file precisely so this stays a few hundred bytes, not a path per symbol).

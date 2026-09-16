@@ -20,7 +20,7 @@ PHASE A FIXES (code):
 1. NAMING FIXES — For each naming inconsistency:
    - Canonical name: {canonical} → language convention: {expected_name}
    - Rename the function/method/class in its source file using Edit
-   - Update the export in __init__.py / index.ts
+   - Update the export in the crate/package root — `__init__.py` (Python), `index.ts` (TypeScript), `lib.rs` (Rust, including any `pub use` alias that renames the symbol)
    - Update any internal references within the same repo
 
 2. MISSING API STUBS — For each missing symbol:

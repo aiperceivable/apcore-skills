@@ -11,7 +11,16 @@ Executed by **extraction sub-agents**, not by an orchestrator. Split out of
 
 #### What Constitutes the Public API
 
-The public API is defined by the **protocol specification** (`apcore/PROTOCOL_SPEC.md`) and **feature specs** (`apcore/docs/features/*.md`). Each SDK must implement these contracts.
+The public API is defined by the **protocol specification** and **feature specs**
+of the scope group's documentation repo — `{doc_repo}/PROTOCOL_SPEC.md` (when the
+group has one) and `{doc_repo}/docs/features/*.md`. Each SDK in that group must
+implement those contracts.
+
+`{doc_repo}` is resolved per scope group by the caller, not assumed: `apcore/` for
+`core`, `apcore-mcp/` for `mcp`, and the corresponding docs repo for any further
+group. Do not read `apcore/PROTOCOL_SPEC.md` when extracting a non-core SDK — it
+describes a different contract, and silently comparing against it produces
+confident, wrong findings.
 
 Public API surface includes:
 1. **Exported classes/structs** — listed in `__init__.py` (Python), `index.ts` (TypeScript), `lib.rs` (Rust), etc.
@@ -154,7 +163,8 @@ For each exported symbol, extract:
   "kind": "class",
   "language_name": "Registry",          // actual name in this language
   "canonical_name": "Registry",         // protocol-defined name
-  "module_path": "crate::registry",     // where it's defined (for Rust)
+  "source_file": "src/registry.rs",     // MANDATORY — see below. Path relative to the REPO ROOT
+  "module_path": "crate::registry",     // logical module path (for Rust) — NOT a file path
   "visibility": "pub",                  // pub | pub(crate) | exported
   "generics": [],                       // generic type parameters + bounds
   "derives": ["Clone", "Debug"],        // Rust derive macros
@@ -196,6 +206,33 @@ For each exported symbol, extract:
   ]
 }
 ```
+
+**`source_file` is MANDATORY for every top-level symbol, in every language.**
+It is the path of the file where the symbol is *defined* — follow re-export
+chains to the definition, never record the barrel file (`__init__.py`,
+`index.ts`, `lib.rs`) unless the symbol is genuinely defined there. Always
+relative to the repo root, forward slashes, no leading `./`.
+
+Do not confuse it with `module_path`, which is a *logical* path
+(`crate::registry`) and exists only for languages that have one. A logical
+module path cannot be opened and read; consumers downstream need a path they
+can pass to a file reader.
+
+The consumer is sync's Step 4C.1, which resolves `module name → symbols →
+source files per language` so a deep-chain sub-agent can be handed the same
+module's source in every language side by side. Without `source_file` that
+resolution has to be guessed, and a wrong guess makes the sub-agent analyze the
+wrong file and report a clean result — a silent false negative, which is the
+exact failure mode Step 4C exists to prevent. If a symbol's defining file
+genuinely cannot be determined, emit `"source_file": null` and say so in the
+summary; never fill in a plausible-looking path.
+
+**Two spellings, one concept.** `source_file: null` is the field-level form used
+by this schema. sync's text summary format serializes the same state as the
+literal path `(unresolved)` in its `FILE_MAP` section
+(`sync/references/extract-api-prompt.md`). Consumers must treat the two as
+equivalent — an orchestrator that only checks for `(unresolved)` will silently
+mis-handle a `null`, and vice versa.
 
 **Trait/interface satisfaction extraction (per language).**
 
@@ -379,6 +416,7 @@ After extraction, verify completeness before proceeding to comparison:
 3. **File coverage**: Count source files in `src/` vs. files actually read. Report percentage. If < 80% → WARNING, investigate.
 4. **Symbol count sanity**: Compare extracted symbol count against typical density (2-10 public symbols per source file). Major deviation → WARNING.
 5. **Trait implementation coverage** (Rust): Count trait definitions vs. found `impl Trait for X` blocks. Missing implementations → flag.
+6. **`source_file` coverage**: Count top-level symbols carrying a non-null `source_file` vs. total top-level symbols. Anything below 100% → WARNING naming the symbols that lack one. A symbol whose defining file is unknown cannot be routed to a deep-chain sub-agent, so it silently drops out of Step 4C coverage — report it rather than letting it vanish.
 
 Report verification results:
 ```
@@ -387,6 +425,7 @@ Extraction Verification: apcore-rust
   Re-exports: 8/8 pub use chains resolved (100%) ✓
   Files: 22/24 source files read (92%) — 2 files in examples/ skipped ✓
   Symbols: 47 public items extracted (3.1 per file — reasonable) ✓
+  Source files: 47/47 symbols mapped to a defining file (100%) ✓
   Trait impls: 5 traits defined, 12 impl blocks found ✓
 ```
 

@@ -81,7 +81,7 @@ Consistency Health (from latest reports):
 
 Commands:
 
-  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--save]
+  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--save]
       Cross-language API + contract + documentation consistency check & fix
 
   /apcore-skills:sdk <language> [--type core|mcp] [--ref <existing-sdk>]

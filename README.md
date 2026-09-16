@@ -9,7 +9,7 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
-| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
+| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--modules mod1,mod2,...] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
 | `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--no-deep-chain] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |

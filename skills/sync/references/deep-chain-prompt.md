@@ -15,10 +15,17 @@ You are responsible for ONE module: **{module_name}**.
 You have the source files for this module in every language that implements it:
 
 {source_files}
-  (one file path per language, e.g.,
+  (one or more file paths per language — the orchestrator resolved these from each
+   repo's FILE_MAP, so a module whose symbols live in several files lists them all.
+   Read every path listed for every language, e.g.,
    python:  apcore-python/src/apcore/registry/registry.py
+            apcore-python/src/apcore/registry/discovery.py
    typescript: apcore-typescript/src/registry/registry.ts
    rust:    apcore-rust/src/registry/registry.rs)
+
+A language may be absent from this list entirely — that means its source could not
+be resolved for this module, and the orchestrator has already reported it. Diff the
+languages you were given; do not go looking for the missing one.
 
 Public symbols to analyze in this module:
 
@@ -39,7 +46,7 @@ Verified public API (from Phase A Step 4.4, canonical per-symbol signatures):
 
 ### Step 1. Read every source file fully
 
-For each language's source file, read the ENTIRE file — not just the public method bodies. Private helpers, module-level constants, and protocol/interface definitions at the top of the file are all in scope because the public method may call them.
+For each language's source file — **every path listed, not just the first per language** — read the ENTIRE file — not just the public method bodies. Private helpers, module-level constants, and protocol/interface definitions at the top of the file are all in scope because the public method may call them.
 
 If the module references helpers imported from elsewhere within the same repo, follow the import and read those too — but only files inside the same repo. Do NOT cross into other repos.
 

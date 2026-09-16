@@ -18,31 +18,42 @@ The per-class checklist Step 4.1 builds and Step 4.2 evaluates. One row per
 check item, one column per implementation repo, plus a `Status` column carrying
 `PASS` / `FAIL` / `WARN`. Nest rows under the symbol they belong to.
 
+Columns are **dynamic** — one per implementation repo actually in scope, in the
+order Step 1.2 resolved them. The example below shows the three languages
+currently in scope (Python, TypeScript, Rust); a run scoped with `--lang` to
+fewer repos renders fewer columns.
+
 ```
-┌────────────────────────┬──────────┬──────────┬──────────┬──────────┐
-│ Check Item             │ Spec     │ Python   │ TypeScript│ Status   │
-├────────────────────────┼──────────┼──────────┼──────────┼──────────┤
-│ Registry               │          │          │          │          │
-│  ├─ class exists       │ ✓        │ ✓        │ ✓        │ PASS     │
-│  ├─ constructor params │          │          │          │          │
-│  │  ├─ config: Config  │ required │ required │ required │ PASS     │
-│  │  └─ discoverers     │ optional │ optional │ MISSING  │ FAIL     │
-│  ├─ method: register   │          │          │          │          │
-│  │  ├─ exists          │ ✓        │ ✓        │ ✓        │ PASS     │
-│  │  ├─ name convention │ register │ register │ register │ PASS     │
-│  │  ├─ params          │ (module) │ (module) │ (module) │ PASS     │
-│  │  ├─ return type     │ None     │ None     │ void     │ PASS     │
-│  │  └─ async           │ no       │ no       │ no       │ PASS     │
-│  ├─ method: get_module │          │          │          │          │
-│  │  ├─ exists          │ ✓        │ ✓        │ ✓        │ PASS     │
-│  │  ├─ name convention │ get_mod  │ get_mod  │ getMod   │ PASS     │
-│  │  ├─ params          │ (id)     │ (id)     │ (id)     │ PASS     │
-│  │  └─ return type     │ Module?  │ Module?  │ Module?  │ PASS     │
-│  ├─ method: scan_dir   │          │          │          │          │
-│  │  ├─ exists          │ ✓        │ ✓        │ ✗        │ FAIL     │
-│  │  ...                │          │          │          │          │
-└────────────────────────┴──────────┴──────────┴──────────┴──────────┘
+┌────────────────────────┬──────────┬──────────┬───────────┬───────────────┬──────────┐
+│ Check Item             │ Spec     │ Python   │ TypeScript│ Rust          │ Status   │
+├────────────────────────┼──────────┼──────────┼───────────┼───────────────┼──────────┤
+│ Registry               │          │          │           │               │          │
+│  ├─ class exists       │ ✓        │ ✓        │ ✓         │ ✓             │ PASS     │
+│  ├─ constructor params │          │          │           │               │          │
+│  │  ├─ config: Config  │ required │ required │ required  │ required      │ PASS     │
+│  │  └─ discoverers     │ optional │ optional │ MISSING   │ optional      │ FAIL     │
+│  ├─ method: register   │          │          │           │               │          │
+│  │  ├─ exists          │ ✓        │ ✓        │ ✓         │ ✓             │ PASS     │
+│  │  ├─ name convention │ register │ register │ register  │ register      │ PASS     │
+│  │  ├─ params          │ (module) │ (module) │ (module)  │ (module)      │ PASS     │
+│  │  ├─ return type     │ None     │ None     │ void      │ ()            │ PASS     │
+│  │  └─ async           │ no       │ no       │ no        │ no            │ PASS     │
+│  ├─ method: get_module │          │          │           │               │          │
+│  │  ├─ exists          │ ✓        │ ✓        │ ✓         │ ✓             │ PASS     │
+│  │  ├─ name convention │ get_mod  │ get_mod  │ getMod    │ get_mod       │ PASS     │
+│  │  ├─ params          │ (id)     │ (id)     │ (id)      │ (id)          │ PASS     │
+│  │  └─ return type     │ Module?  │ Module?  │ Module?   │ Option<Module>│ PASS     │
+│  ├─ method: scan_dir   │          │          │           │               │          │
+│  │  ├─ exists          │ ✓        │ ✓        │ ✗         │ ✓             │ FAIL     │
+│  │  ...                │          │          │           │               │          │
+└────────────────────────┴──────────┴──────────┴───────────┴───────────────┴──────────┘
 ```
+
+The `return type` rows show why the cells are compared through
+`shared/api-extraction.md` E.4's type-mapping table rather than by string
+equality: `None` / `void` / `()` are the same return, and `Module?` /
+`Option<Module>` are the same optional. A literal diff of those cells would
+report four false FAILs on a correct implementation.
 
 ---
 
