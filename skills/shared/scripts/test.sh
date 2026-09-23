@@ -3,7 +3,9 @@
 #
 # Run this before committing changes to ANY script in this directory OR to the
 # companion markdown specs they mirror (ecosystem.md, scoring.md,
-# api-extraction.md). CI runs the exact same command (.github/workflows/scripts.yml).
+# api-extraction.md). selfcheck.py additionally holds the cross-file invariants
+# no single document states — flag spelling, finding-ID namespaces, which fields
+# have consumers, and whether a cached prompt changed without its tag being bumped. CI runs the exact same command (.github/workflows/scripts.yml).
 #
 # Usage: skills/shared/scripts/test.sh
 # Exit 0 = all green; non-zero = a selftest or syntax check failed.
@@ -24,6 +26,12 @@ echo "== audit-mechanical.py --selftest =="
 
 echo "== extract_cache.py --selftest =="
 "$PY" "$HERE/extract_cache.py" --selftest
+
+echo "== selfcheck.py --selftest =="
+"$PY" "$HERE/selfcheck.py" --selftest
+
+echo "== selfcheck.py (plugin self-consistency) =="
+"$PY" "$HERE/selfcheck.py" --root "$HERE/../../.."
 
 echo "== extract-markers.sh (bash -n syntax) =="
 bash -n "$HERE/extract-markers.sh"

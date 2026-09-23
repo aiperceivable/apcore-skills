@@ -1,0 +1,61 @@
+{
+  "_comment": "Manifest for selfcheck.py. Each entry records a dependency that no single file states, so a mechanical check can hold it. Update deliberately \u2014 see the fix text each check emits.",
+  "field_consumers": {
+    "skills/sync/references/extract-api-prompt.md": {
+      "_why": "Fields in this output format are what Step 4B and audit D10 compare. A field added here and nowhere else ships inert \u2014 this happened to errors_propagated.",
+      "fields": [
+        "source_file",
+        "FILE_MAP",
+        "errors_raised",
+        "errors_propagated",
+        "propagation_truncated",
+        "EXTRACTION_VERIFICATION"
+      ],
+      "consumers": [
+        "skills/sync/SKILL.md",
+        "skills/audit/references/dimension-prompts.md",
+        "skills/shared/api-extraction-protocol.md",
+        "skills/shared/contract-spec.md"
+      ]
+    },
+    "skills/sync/references/audit-doc-repo-prompt.md": {
+      "_why": "Phase B's coverage block is only worth emitting if the orchestrator gates on it.",
+      "fields": [
+        "DOC_AUDIT_COVERAGE"
+      ],
+      "consumers": [
+        "skills/sync/SKILL.md"
+      ]
+    },
+    "skills/sync/references/deep-chain-prompt.md": {
+      "_why": "4C's sub-agent payload shape is validated by the orchestrator on both fresh and cached results.",
+      "fields": [
+        "graphs_available_for",
+        "analyzed_symbols",
+        "confidence_notes"
+      ],
+      "consumers": [
+        "skills/sync/SKILL.md"
+      ]
+    }
+  },
+  "tag_covers": {
+    "sync-extract-v3": {
+      "_why": "Step 2's cache is keyed partly by this tag. Editing the prompt without bumping serves entries built under a different output schema.",
+      "files": {
+        "skills/sync/references/extract-api-prompt.md": "0423630dc359b306",
+        "skills/shared/api-extraction-protocol.md": "908e43498923b61c"
+      }
+    },
+    "sync-deepchain-v2": {
+      "_why": "Step 4C's cache tag. Covers the prompt AND 4C.4's guard rules, since a cache hit does not re-run the guards.",
+      "files": {
+        "skills/sync/references/deep-chain-prompt.md": "a86063aaac7a590d"
+      }
+    }
+  },
+  "conventional_negative_flags": [
+    "--no-cache"
+  ],
+  "_conventional_negative_flags_why": "Bare --no-X is normally a smell (it cannot gain values later), but --no-cache is a cross-tool convention (npm, pip, docker, cargo) and renaming it to --cache on|off would be the surprising choice. Allowlist it rather than teaching readers to ignore this check. Add to this list only for genuinely established conventions."
+}

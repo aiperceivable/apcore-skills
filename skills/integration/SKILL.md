@@ -9,6 +9,7 @@ description: >
 
 # Apcore Skills — Integration
 
+
 ## ⚡ Execution Entry Point (READ THIS FIRST)
 
 **When this skill is loaded, you MUST immediately begin executing the Workflow below — do not wait, do not summarize, do not ask "what should I do now". Skills are operational manuals, not reference documents.** Read the first executable step, perform it, then the next, etc., until the workflow completes or you reach an `AskUserQuestion` checkpoint.
@@ -22,6 +23,16 @@ The first user-visible action of this skill should be either (a) the output of t
 ---
 
 Bootstrap a new framework integration that connects a web framework to the apcore ecosystem.
+
+## Sub-agent Dispatch Policy
+
+@../shared/subagent-policy.md
+
+**integration-specific bindings:**
+
+- **P2 ceiling: 4.** Flags that reduce it: n/a
+- **P1/P3 plan:** Bootstrap is inherently small - one scaffold agent plus at most one verification agent.
+- **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
 

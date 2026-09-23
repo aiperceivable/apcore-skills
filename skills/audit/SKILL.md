@@ -9,6 +9,7 @@ description: >
 
 # Apcore Skills — Audit
 
+
 ## ⚡ Execution Entry Point (READ THIS FIRST)
 
 **When this skill is loaded, you MUST immediately begin executing the Workflow below — do not wait, do not summarize, do not ask "what should I do now". Skills are operational manuals, not reference documents.** Read Step 0 (Ecosystem Discovery), then Step 1 (Parse Arguments), then Step 2 (Execute Audit Dimensions), etc., until the workflow completes or you reach an `AskUserQuestion` checkpoint.
@@ -22,6 +23,16 @@ The first user-visible action of this skill should be either (a) the output of S
 ---
 
 Comprehensive consistency audit across all apcore ecosystem repositories.
+
+## Sub-agent Dispatch Policy
+
+@../shared/subagent-policy.md
+
+**audit-specific bindings:**
+
+- **P2 ceiling: 12.** `--deep-chain` is **off by default**, so D11 costs nothing unless you opt in. Flags that reduce the rest: `--scope`
+- **P1/P3 plan:** Step 2b = up to 6 parallel dimensions + the D11 delegation to `sync` Step 4C. D11 inherits sync's own ceiling; count it as 1 here, not as sync's 40.
+- **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
 
@@ -37,14 +48,15 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 ## Command Format
 
 ```
-/apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--no-deep-chain] [--strict] [--save report.md]
+/apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--deep-chain on|off] [--strict] [--save report.md]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--scope` | **cwd** | Which repo group to audit. **If omitted, defaults to the current working directory's repo only.** Use `--scope all` for full ecosystem audit. |
+| `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all` — the shared scope vocabulary from `shared/ecosystem.md` §0.3, identical across every skill. **If omitted and no positional repos, defaults to the current working directory's repo only.** |
 | `--fix` | off | Auto-fix issues where safe |
-| `--no-deep-chain` | off (D11 runs by default) | Skip D11 (cross-language deep-chain analysis). Use for fast audits where you only need D1–D10 shape-level checks. D11 adds one sub-agent per logical module; disabling saves time on large module sets. |
+| `--deep-chain` | **`off`** | Cross-language deep-chain analysis (D11). Set `--deep-chain on` to enable. **Off by default**: D11 delegates to `sync` Step 4C, which spawns one sub-agent per logical module — 22 on `apcore/`, an estimated ~4.4 M tokens cold, an order of magnitude more than every other dimension combined. Enable it deliberately, scoped: `--deep-chain on` plus sync's `--modules`. What you lose by leaving it off is chain-level divergence only — **D10 still compares declared contract shape on every run**, and on this ecosystem D10 alone produced 331 divergences including 10 criticals. Same spelling and default as `apcore-skills:sync --deep-chain`, deliberately: D11 *is* sync's Step 4C. |
+| `--no-deep-chain` | — | **Deprecated alias.** Now a no-op, since `off` is the default; kept so existing commands do not error. Use `--deep-chain on` to opt in. |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default the audit suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), D2 style-only nits (clippy lints whose suggestion is just `allow(...)` or rename-for-idiom), and findings tagged `[verify-spec-first]` (where the audit cannot independently determine which spec interpretation is authoritative). Pass `--strict` before a release audit when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker` findings, spec violations, dead code (D9), and API surface gaps (D1) always surface regardless of this flag. |
 | `--save` | off | Save report to file |
 
@@ -115,7 +127,9 @@ Step 0 (ecosystem) → Step 1 (parse args) → Step 2 (parallel audits) → Step
 
 ### Step 1: Parse Arguments and Plan Audit
 
-Parse `$ARGUMENTS` for flags. Recognized flags: `--scope`, `--fix`, `--no-deep-chain`, `--strict`, `--save`. Unknown flags must be reported back to the user as an error before any sub-agent is spawned.
+Parse `$ARGUMENTS` for flags. Recognized flags: `--scope`, `--fix`, `--deep-chain`, `--no-deep-chain` (deprecated alias), `--strict`, `--save`.
+
+**`DEEP_CHAIN`** — resolve to `on`/`off` before anything else reads it: `--deep-chain off` → off; bare `--no-deep-chain` → off; neither present → `on`. If both appear, `--deep-chain` wins and a one-line note is printed. Every check below tests `DEEP_CHAIN == off`, never the raw flag text, so the alias cannot drift out of sync with the canonical spelling. Unknown flags must be reported back to the user as an error before any sub-agent is spawned.
 
 **Set `STRICT_MODE`:** `true` if `--strict` appears anywhere in `$ARGUMENTS`, else `false`. Pass this value to the Step 2.5.5 suppression pass and surface it in the Step 3 report header.
 
@@ -154,7 +168,7 @@ Both modes can run in the same audit invocation — a `--scope all` run exercise
 **D11 (Deep-Chain Parity) trigger rule.** Runs whenever ≥2 same-type impl repos are in scope AND D10's Parity mode is active (they share the "need peers to compare against" precondition). Skipped with INFO when:
 - Only 1 impl repo in scope (no peer)
 - Scope is `integrations` only (single-language chain analysis is code-forge:review's job)
-- User passes `--no-deep-chain` (escape hatch for fast audits)
+- `DEEP_CHAIN == off` (the default) — skip D11 **and emit the NOT RUN disclosure** required by `sync` SKILL.md 4C.0, rendered in the D11 slot of the audit report. An absent D11 section and a clean D11 section must not look alike. (escape hatch for fast audits — set by `--deep-chain off` or the deprecated `--no-deep-chain`)
 
 Display:
 ```
@@ -202,14 +216,14 @@ Spawn these **in parallel**, one sub-agent each (up to 5 simultaneously). **D11 
 #### Step 2.D11: Deep-Chain Parity (delegates to sync Step 4C)
 
 **Skip conditions** (all three must be false for D11 to run):
-- `--no-deep-chain` flag present
+- `DEEP_CHAIN == off`
 - <2 impl repos in scope (after `--scope` resolution) OR scope is `integrations`-only
 - D10 Parity mode was skipped (same precondition)
 
 **Invocation.** Spawn a single `Agent(subagent_type="general-purpose")` tasked with running sync Step 4C internally. The prompt is:
 
 ```
-Run /apcore-skills:sync {impl_repo_1},{impl_repo_2},...,{doc_repo} --phase a --internal-check=contract --deep-chain=on --save {ecosystem_root}/audit-d11-{YYYY-MM-DD}.md
+Run /apcore-skills:sync {impl_repo_1},{impl_repo_2},...,{doc_repo} --skip-docs --internal-check=contract --deep-chain=on --save {ecosystem_root}/audit-d11-{YYYY-MM-DD}.md
 
 Do NOT execute Phase B. Do NOT execute tester. Only Phase A is required, and within Phase A only Step 4C findings are needed — the rest (4.1–4.3, 4A, 4B) may run but will be discarded.
 
@@ -397,7 +411,7 @@ Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-
   D8 Project Structure   |    0     |    1    |   2  |      —
   D9 Bloat & Redundancy  |    1     |    8    |   5  |      —
   D10 Contract Parity    |    3     |    4    |   2  |      —
-  D11 Deep-Chain Parity  |    5     |    2    |   0  |      3
+  D11 Deep-Chain Parity  |          —  NOT RUN (default; --deep-chain on to enable)  —
   ─────────────────────────────────────────────────────────────
   TOTAL                  |   13     |   31    |  20  |      3
 
@@ -454,6 +468,12 @@ Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-
     property.*:           {N}
 
 ═══ DEEP-CHAIN PARITY REPORT (D11 — CHAIN-LEVEL) ═══
+
+  When DEEP_CHAIN == off (THE DEFAULT), this whole block is REPLACED by the
+  NOT RUN disclosure from `sync` SKILL.md 4C.0 — never rendered empty, never
+  dropped. In the dimension matrix above, D11's row reads `— NOT RUN —` across
+  every severity column rather than zeros: a row of zeros says "checked, clean",
+  which is the one thing it must not say. D10's row is unaffected; it runs either way.
 
   Delegated to: sync Step 4C (report saved: {audit-d11-{date}.md})
   Modules analyzed: {N}
@@ -616,7 +636,7 @@ _(No actionable issues found — all checks passed.)_
 Group fixable findings by repo. Separate unfixable findings for reporting.
 
 **Unfixable (skip and report):**
-- API surface fixes (complex — delegate to `/apcore-skills:sync --phase a --fix`)
+- API surface fixes (complex — delegate to `/apcore-skills:sync --skip-docs --fix`)
 - Contract parity fixes (D10 — delegate to `/apcore-skills:sync --internal-check=contract --fix`, or pipe the review-compatible output from Step 3.1 to `/code-forge:fix --review`)
 - **Deep-chain fixes (D11 — MANUAL REVIEW ONLY, never auto-fix.)** Chain-level divergences require porting logic semantics between languages, which pattern-matching cannot do safely. Surface in MANUAL_REVIEW_ITEMS with the full evidence block and sub-agent recommendation. The operator may pipe the Step 3.1 review output to `/code-forge:fix --review`, but the fix agent itself must treat D11 findings as requiring human authorship — not copy-paste translation.
 - Dependency fixes (risky — show as recommendations only)
@@ -640,8 +660,8 @@ Tests after fix:
   {repo-2}: {pass}/{total} passing ✓
 
 Unfixed (manual action needed):
-  [D1-001] API surface gap — use /apcore-skills:sync --phase a --fix
-  [D4-xxx] Doc inconsistency — use /apcore-skills:sync --phase b for deep check
+  [D1-001] API surface gap — use /apcore-skills:sync --skip-docs --fix
+  [D4-xxx] Doc inconsistency — use /apcore-skills:sync (without --skip-docs) for the doc pass
   [D6-002] Dependency version — manually update {package}
 
 Review changes:

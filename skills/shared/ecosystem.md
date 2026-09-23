@@ -114,7 +114,30 @@ For each discovered directory:
 
 Store `repos[]` — list of discovered repository objects with: `name`, `path`, `type`, `language`, `version`, `package_name`, `git_status`.
 
-#### 0.3 Detect CWD Repo
+#### 0.3 The `--scope` vocabulary (shared — every skill uses these exact values)
+
+`--scope` takes one of **`core` | `mcp` | `integrations` | `all`** in every skill that
+accepts it. The values are the `scope_group` names assigned in 0.3.1 below, so the flag
+and the discovery output speak the same language.
+
+| Value | Repos | Notes for skills that behave differently |
+|---|---|---|
+| `core` | the `protocol` repo + every `core-sdk` repo | — |
+| `mcp` | the `docs-site` repo for MCP + every `mcp-bridge` repo | — |
+| `integrations` | every `integration` repo | Integration repos have no protocol spec, so any spec-vs-implementation phase is N/A for them; skills that have one run only their documentation pass (e.g. `sync` Step 1.2). This is a property of the repo type, not of the flag. |
+| `all` | every discovered repo | |
+
+**Default when omitted: the current working directory's repo only** (0.3.1). Skills MUST
+NOT invent extra values, drop a value from the list, or give one a different meaning. A
+skill that genuinely cannot act on a value reports why — it does not treat it as an
+unknown flag.
+
+Further `scope_group` names exist in discovery output (`a2a`, `toolkit`, `shared`,
+`tooling`, `docs`, and any `apcore-{type}-{lang}` wildcard). They are **not** `--scope`
+values yet: no skill has a defined behaviour for them. Reaching those repos today is done
+by naming them positionally.
+
+#### 0.3.1 Detect CWD Repo
 
 Determine `cwd_repo` — the repo the user is currently working in:
 1. Get CWD basename (e.g., `apcore-python`)
@@ -203,8 +226,7 @@ Every skill that produces a report and accepts `--save` MUST use these canonical
 | audit | `/apcore-skills:audit --save` (no arg) | `{ecosystem_root}/audit-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
 | audit (from release gate) | release Step 2.5.1 | `{ecosystem_root}/release-audit-{version}.md` |
 | sync | `/apcore-skills:sync --save` (no arg) | `{ecosystem_root}/sync-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
-| sync Phase A only | `/apcore-skills:sync --phase a --save` | `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` |
-| sync Phase B only | `/apcore-skills:sync --phase b --save` | `{ecosystem_root}/sync-report-phase-b-{cwd_repo}-{YYYY-MM-DD}.md` |
+| sync Phase A only | `/apcore-skills:sync --skip-docs --save` | `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` |
 | sync (from release gate) | release Step 2.5.2 | `{ecosystem_root}/release-sync-{version}.md` |
 | tester | `/apcore-skills:tester --save` (no arg) | `{ecosystem_root}/tester-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
 | tester (from release gate) | release Step 6 | `{ecosystem_root}/release-tester-{version}.md` |
@@ -228,6 +250,7 @@ Skills that spawn sub-agents to extract a deterministic summary from unchanged l
 - **Purely local and offline.** The hash is computed from bytes already on disk (`hashlib.sha256` over sorted `(relpath, content)` pairs). No git invocation, no network access — a dirty working tree is hashed exactly as it sits.
 - **Only cache output that already cleared the consumer's own quality gate.** If the consumer has a coverage/validation gate on a fresh sub-agent's output (e.g. sync's Step 2 extraction-coverage gate, Step 4C's shape check + anti-pattern guards), a `put` MUST happen only for output that passed cleanly — never persist a partial/failed/warned result, or it gets frozen indefinitely instead of getting a fresh independent attempt next run.
 - **Schema-version tag.** Pass a short literal tag (e.g. `"sync-extract-v2"`) via `extract_cache.py check --extra <tag>` so that editing the sub-agent's prompt template — **or the orchestrator's own write-time validation/anti-pattern-guard logic** — invalidates every cached entry without needing to touch source files. Bump the tag whenever `references/extract-api-prompt.md` / `references/deep-chain-prompt.md` changes, or whenever a validation rule tightens, in a way that could change which outputs would now be accepted for the same input.
+- **Always `check --out-file <path>`.** On a hit the payload is written there and stdout carries only `{status, hash, data_file, bytes}`. Without it the whole payload prints to stdout and lands in the caller's context — measured at 941 KB across three repos, which makes a cache **hit** ~1200× more expensive than a miss and inverts the point of caching. See `shared/subagent-policy.md` P8.
 - **`.gitignore`.** If `ecosystem_root` itself is (or is inside) a git repo, add `.apcore-skills-cache/` to its `.gitignore` — the cache is a local performance artifact, not something to commit or share. Do this at the actual point a consumer first creates the directory (its first `put` of a run), not only as a documented convention here.
 - See `sync` Step 2 and Step 4C for the concrete check/put call sequence, including the structural re-validation on hit and the coverage/quality gate on write.
 

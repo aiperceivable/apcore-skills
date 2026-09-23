@@ -9,6 +9,7 @@ description: >
 
 # Apcore Skills — SDK
 
+
 ## ⚡ Execution Entry Point (READ THIS FIRST)
 
 **When this skill is loaded, you MUST immediately begin executing the Workflow below — do not wait, do not summarize, do not ask "what should I do now". Skills are operational manuals, not reference documents.** Read the first executable step, perform it, then the next, etc., until the workflow completes or you reach an `AskUserQuestion` checkpoint.
@@ -22,6 +23,16 @@ The first user-visible action of this skill should be either (a) the output of t
 ---
 
 Bootstrap a new apcore project in a new language. The project type is auto-discovered from the reference implementation — no hardcoded type list.
+
+## Sub-agent Dispatch Policy
+
+@../shared/subagent-policy.md
+
+**sdk-specific bindings:**
+
+- **P2 ceiling: 4.** Flags that reduce it: n/a
+- **P1/P3 plan:** Bootstrap is inherently small - one contract-extraction agent plus one scaffold agent.
+- **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
 
@@ -300,7 +311,7 @@ Once `code-forge:impl` has finished all planned features, run the full consisten
 #### 9.5.1 Sync vs Reference
 
 ```
-/apcore-skills:sync {target-repo-name},{ref-repo-name} --phase all --internal-check=contract --deep-chain=on --save {ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md
+/apcore-skills:sync {target-repo-name},{ref-repo-name} --internal-check=contract --deep-chain on --save {ecosystem_root}/sdk-bootstrap-sync-{target-repo-name}.md
 ```
 
 This compares the new SDK against the reference for:

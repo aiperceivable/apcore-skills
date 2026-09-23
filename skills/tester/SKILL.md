@@ -15,6 +15,7 @@ instructions: >
 
 # Apcore Skills — Tester
 
+
 ## ⚡ Execution Entry Point (READ THIS FIRST)
 
 **When this skill is loaded, you MUST immediately begin executing the Workflow below — do not wait, do not summarize, do not ask "what should I do now". Skills are operational manuals, not reference documents.** Read the first executable step, perform it, then the next, etc., until the workflow completes or you reach an `AskUserQuestion` checkpoint.
@@ -28,6 +29,16 @@ The first user-visible action of this skill should be either (a) the output of t
 ---
 
 Spec-driven test generation and cross-language behavioral verification.
+
+## Sub-agent Dispatch Policy
+
+@../shared/subagent-policy.md
+
+**tester-specific bindings:**
+
+- **P2 ceiling: 3 x repos.** Flags that reduce it: `--repos`, `--category`
+- **P1/P3 plan:** Step 2 = one per target repo (generation) - Step 3 = one per repo (execution) - Step 4 = one per repo (verification). The three passes are sequential, so at most `repos` are ever in flight.
+- **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
 

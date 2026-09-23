@@ -9,10 +9,10 @@ Apcore ecosystem management skill for Claude Code. Handles cross-language SDK sy
 | Command | Usage | Description |
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
-| `/apcore-skills:sync` | `[repos...] [--phase a\|b\|all] [--fix] [--scope core\|mcp\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--modules mod1,mod2,...] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
+| `/apcore-skills:sync` | `[repos...] [--skip-docs] [--fix] [--scope core\|mcp\|integrations\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--modules mod1,mod2,...] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
 | `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
-| `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--no-deep-chain] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
+| `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--deep-chain on\|off] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
 | `/apcore-skills:tester` | `[<repos...>] [--spec <feature>] [--mode generate\|run\|full] [--category unit\|integration\|boundary\|protocol\|contract\|conformance\|all] [--save report.md]` | Spec-driven test generation & cross-language behavioral verification (incl. Contract-derived tests and shared conformance fixtures) |
 | `/apcore-skills:release` | `<version> [--scope core\|mcp\|integrations\|all] [--dry-run]` | Coordinated multi-repo release pipeline |
 

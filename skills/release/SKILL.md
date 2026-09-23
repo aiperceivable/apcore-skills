@@ -13,6 +13,7 @@ instructions: >
 
 # Apcore Skills — Release
 
+
 ## ⚡ Execution Entry Point (READ THIS FIRST)
 
 **When this skill is loaded, you MUST immediately begin executing the Workflow below — do not wait, do not summarize, do not ask "what should I do now". Skills are operational manuals, not reference documents.** Read the first executable step, perform it, then the next, etc., until the workflow completes or you reach an `AskUserQuestion` checkpoint. **Never push without explicit user approval — this is enforced by the workflow's user-confirmation checkpoints, not optional.**
@@ -26,6 +27,16 @@ The first user-visible action of this skill should be either (a) the output of t
 ---
 
 Execute a coordinated release across multiple apcore ecosystem repositories.
+
+## Sub-agent Dispatch Policy
+
+@../shared/subagent-policy.md
+
+**release-specific bindings:**
+
+- **P2 ceiling: 2 x repos.** Flags that reduce it: `--repos`, `--scope`
+- **P1/P3 plan:** Each phase spawns one per repo and the phases run **sequentially** - never hold more than one phase's fan-out in flight. With ~23 repos discovered, 'one per repo, all simultaneously' repeated across five phases is 115 sub-agents; P4's batch-of-3 bound applies to every one of those phases.
+- **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
 
@@ -93,9 +104,9 @@ Parse `$ARGUMENTS`:
 1. Detect CWD repo name (basename of CWD)
 2. Look up in discovered ecosystem:
    - If it's a known apcore repo → release **only this repo**
-   - If CWD is a `protocol`/`docs-site` repo → error: "Documentation repos cannot be released directly. Specify --scope core|mcp|all."
+   - If CWD is a `protocol`/`docs-site` repo → error: "Documentation repos cannot be released directly. Specify --scope core|mcp|integrations|all, or name the repos positionally. Valid values are the shared vocabulary in `shared/ecosystem.md` §0.3."
    - If CWD is not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to release?" with options from `repos[]` names + "All repos (group release)"
-3. Display: "Release scope: {repo-name} (from CWD). Use --scope core|mcp|all for group release."
+3. Display: "Release scope: {repo-name} (from CWD). Use --scope core|mcp|integrations|all for group release."
 
 **If `--scope` IS specified:** use explicit scope.
 

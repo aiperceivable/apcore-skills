@@ -83,6 +83,8 @@ A feature spec SHOULD declare one `## Contract:` block per public method on ever
 
 **`### Errors`** — enumeration of every error type this method can raise, with error code. The spec is authoritative — implementations MUST raise exactly these error codes, and no others, under the conditions described.
 
+A spec `### Errors` list is **caller-observable**, so it does not distinguish an error thrown in the method body from one thrown by a helper it calls — both reach the caller. Extraction does draw that line, into `errors_raised` and `errors_propagated` (`api-extraction-protocol.md` E.4b), because the two are not equally easy to detect and leaving the boundary unstated made the field mean different things per language. **When comparing an implementation against this spec section, compare against the union** of the two extracted fields; when comparing implementations against *each other*, compare each field only against its counterpart. A spec that wants to constrain where an error originates says so in prose — the field split is an extraction artefact, not a spec concept.
+
 **`### Returns`** — return value shape on success. Use canonical type names; language mapping is handled by `api-extraction.md` E.4.
 
 **`### Properties`** — scalar behavioral flags. Each property must be **true**, **false**, or **null** (not a free-form string like `TODO`). `null` explicitly means "not yet determined" and is only valid in newly-scaffolded specs; parsers treat `null` as "unknown / cannot be compared" per sync Step 4B Properties parity rule. Strings like `"TODO"` or `"?"` are a spec-format violation and audit D4 flags them as `info` (contract_coverage / partial). When scaffolding a Contract skeleton where a property's value is not yet known, render it as:

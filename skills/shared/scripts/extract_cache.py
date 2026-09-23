@@ -174,8 +174,23 @@ def cmd_check(args) -> int:
         except Exception:
             entry = None
         if entry and entry.get("content_hash") == digest and entry.get("script_version") == SCRIPT_VERSION:
-            json.dump({"status": "hit", "hash": digest, "cached_at": entry.get("cached_at"),
-                       "data": entry.get("data")}, sys.stdout)
+            data = entry.get("data")
+            if getattr(args, "out_file", None):
+                # Write the payload to disk and return only metadata. A cached
+                # extraction can be hundreds of KB; printing it to stdout puts it
+                # straight into the caller's context, which makes a cache HIT more
+                # expensive than a MISS (a miss returns a small receipt). Callers
+                # that consume the payload as a file MUST pass --out-file.
+                out = Path(args.out_file).expanduser()
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(data if data is not None else "", encoding="utf-8")
+                json.dump({"status": "hit", "hash": digest, "cached_at": entry.get("cached_at"),
+                           "data_file": str(out),
+                           "bytes": len(data.encode("utf-8")) if data is not None else 0},
+                          sys.stdout)
+            else:
+                json.dump({"status": "hit", "hash": digest, "cached_at": entry.get("cached_at"),
+                           "data": data}, sys.stdout)
             sys.stdout.write("\n")
             return 0
 
@@ -258,7 +273,7 @@ def selftest():
 
         ns = SimpleNamespace(
             cache_dir=str(cache_dir), kind="api", key="demo-repo",
-            repo_dir=str(repo), lang="Python", paths=None, extra=None,
+            repo_dir=str(repo), lang="Python", paths=None, extra=None, out_file=None,
         )
         assert cmd_check(ns) == 0
 
@@ -278,7 +293,7 @@ def selftest():
 
         ns3 = SimpleNamespace(
             cache_dir=str(cache_dir), kind="api", key="demo-repo",
-            repo_dir=str(repo), lang="Python", paths=None, extra=None,
+            repo_dir=str(repo), lang="Python", paths=None, extra=None, out_file=None,
         )
         old_stdout = sys.stdout
         sys.stdout = io.StringIO()
@@ -292,7 +307,7 @@ def selftest():
 
         ns_bad_version = SimpleNamespace(
             cache_dir=str(cache_dir), kind="api", key="demo-repo",
-            repo_dir=str(repo), lang="Python", paths=None, extra=None,
+            repo_dir=str(repo), lang="Python", paths=None, extra=None, out_file=None,
         )
         entry_path = cache_dir / "api" / "demo-repo.json"
         stale = json.loads(entry_path.read_text())
@@ -305,6 +320,32 @@ def selftest():
         finally:
             sys.stdout = old_stdout
         assert stale_result["status"] == "miss", "a script_version mismatch must be treated as a miss"
+
+        # --out-file: a hit must write the payload to disk and keep it OFF stdout.
+        # Regression guard: without this, `check` prints the whole cached extraction
+        # (hundreds of KB for a real SDK) into the caller's context, making a cache
+        # hit far more expensive than a miss.
+        entry_path.write_text(json.dumps({
+            "content_hash": hit["hash"], "script_version": SCRIPT_VERSION,
+            "cached_at": "now", "data": "PAYLOAD" * 1000,
+        }))
+        out_path = cache_dir / "api" / "demo-repo.extraction.md"
+        ns_out = SimpleNamespace(
+            cache_dir=str(cache_dir), kind="api", key="demo-repo",
+            repo_dir=str(repo), lang="Python", paths=None, extra=None,
+            out_file=str(out_path),
+        )
+        sys.stdout = io.StringIO()
+        try:
+            assert cmd_check(ns_out) == 0
+            out_result = json.loads(sys.stdout.getvalue())
+        finally:
+            sys.stdout = old_stdout
+        assert out_result["status"] == "hit", "--out-file must not change hit detection"
+        assert "data" not in out_result, "--out-file must keep the payload off stdout"
+        assert out_result["data_file"] == str(out_path)
+        assert out_result["bytes"] == 7000
+        assert out_path.read_text() == "PAYLOAD" * 1000, "payload must land in the file intact"
 
         assert cmd_clear(SimpleNamespace(cache_dir=str(cache_dir), kind="api")) == 0
         assert not (cache_dir / "api" / "demo-repo.json").exists(), "clear --kind api must remove the api entry"
@@ -325,6 +366,7 @@ def main(argv=None):
     p_check.add_argument("--lang", help="language for --repo-dir extension filtering")
     p_check.add_argument("--paths", nargs="*", help="hash mode: explicit file list (Step 4C)")
     p_check.add_argument("--extra", action="append", help="extra text folded into the hash (e.g. spec contract text); repeatable")
+    p_check.add_argument("--out-file", help="on a hit, write the cached payload here and omit it from stdout (returns data_file + bytes instead of data)")
     p_check.set_defaults(func=cmd_check)
 
     p_put = sub.add_parser("put", help="store sub-agent output under a content hash")

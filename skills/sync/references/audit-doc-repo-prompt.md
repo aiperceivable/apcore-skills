@@ -24,7 +24,14 @@ Before emitting ANY finding, pass the candidate through:
 
 === SCOPE 1: Spec Chain Consistency ===
 
-Read all available documents from the spec chain:
+**⚠️ INDEX THE CORPUS — DO NOT READ IT WHOLE.** The spec chain on this ecosystem is
+**~4.4 MB** (`PROTOCOL_SPEC.md` 713 KB, `docs/features/*.md` 870 KB, plus architecture,
+concepts, glossary, guides and spec/). Reading it end to end does not fit, and an agent
+that tries will truncate somewhere and report the surviving fraction as if it were the
+whole — a clean-looking result on a partial corpus, which is the worst outcome available
+here. Follow `shared/subagent-policy.md` P10.
+
+Documents in the spec chain:
 - PRD (if exists): docs/prd.md or similar
 - SRS (if exists): docs/srs.md or similar
 - Tech Design (if exists): docs/tech-design.md or similar
@@ -32,9 +39,22 @@ Read all available documents from the spec chain:
 - Feature Specs: docs/features/*.md
 - Protocol Spec (if exists): PROTOCOL_SPEC.md
 
-For each API symbol (class, function, parameter, return type) mentioned across multiple documents:
-1. Collect ALL references: which document, what section, what it says
-2. Compare: do all documents agree on the symbol's name, parameters, behavior, and types?
+**Work symbol-first, not document-first.** The check is "do the documents agree about
+symbol X", so only the regions that mention a symbol matter, and only symbols mentioned
+in **two or more** documents can disagree at all:
+
+1. **Build the index with grep** (cheap, no bodies):
+   ```
+   grep -nE '\b[A-Z][A-Za-z0-9_]*\.[a-z_][A-Za-z0-9_]*\(' <each doc>   # Class.method( references
+   grep -n  '^#+ ' <each doc>                                            # heading map, for slicing
+   ```
+   Build `symbol -> [(document, line), ...]`.
+2. **Discard single-document symbols.** A symbol appearing in exactly one document has
+   nothing to contradict. On a real corpus this removes the large majority of hits.
+3. **For each surviving symbol**, read only the line ranges around its occurrences
+   (heading to next heading), compare, then **discard those slices before the next
+   symbol**. Never accumulate.
+4. Compare: do all documents agree on the symbol's name, parameters, behavior, and types?
 3. Flag contradictions:
    - PRD says feature X has capability A, but feature spec says no such capability
    - SRS requirement REQ-001 references function foo(), but tech design calls it bar()
@@ -136,3 +156,25 @@ Error handling:
 - If no spec chain documents are found (no PRD, SRS, tech design, feature specs), return: DOC_REPO: {repo-name}, STATUS: NO_DOCS, DOCUMENTS_FOUND: []
 - If individual files cannot be read, skip them and list in DOCUMENTS_FOUND as "{path} (unreadable)"
 - If CHANGELOG.md is missing or has no Removed/Deprecated sections, skip SCOPE 5 and report DEPRECATED_REFS: 0
+
+---
+
+## Coverage self-report (MANDATORY — append to your output)
+
+Without this the orchestrator cannot tell a thorough pass from a truncated one, and a
+doc audit that quietly read half the corpus reports "no contradictions" just as
+confidently as one that read all of it.
+
+```
+DOC_AUDIT_COVERAGE:
+  Documents indexed: {N}/{M} spec-chain documents ({pct}%)
+  Corpus size: {total KB} indexed, {KB} actually sliced and read
+  Symbols indexed: {N} distinct
+  Multi-document symbols: {N}  (the only ones that can contradict; all compared: yes/no)
+  Symbols compared: {N}/{N}
+  Skipped: {list any document you could not open or chose not to index, with the reason}
+```
+
+Report the real numbers. If you could not index a document, say so — a named gap is
+recoverable, a silent one poisons every finding in this report. Never round coverage up,
+and never report 100% you did not achieve.

@@ -61,6 +61,10 @@ Unified consistency verification across all apcore ecosystem documentation and i
 | "Trait satisfaction is a Rust thing, skip it for other languages" | Every language has an equivalent: Python `__str__` / TS `toString()` / Go `String()` / Rust `impl Display`. The protocol spec defines required interface contracts; each language must satisfy them with its idiomatic mechanism. Build a dedicated checklist row. |
 | "Multiple constructors are language-specific sugar" | Rust's `Self::new()` / `Self::with_config()` / `Self::from_env()` corresponds to Python `classmethod` factories, TS static factories, Go `NewX` / `NewXFromY`. If the spec defines multiple construction paths, every language must expose all of them. Treat constructors as a list, not a single entry. |
 | "Contract extraction (4B) already catches intent divergence, deep-chain is redundant" | NO. 4B's sub-agent is **one-per-repo doing shape extraction** — it lists `inputs/errors/side_effects` as declared fields. It cannot see bugs that only appear when you read the code: bare dict subscripts that throw `KeyError` on malformed input, internal methods that silently skip validation, functions that fail to update a map the peer language updates. These are visible in the AST, not in the contract shape. Step 4C reads all N languages' source for one module **side-by-side** and diffs the call graphs — that is how the `_discover_custom` / `discover_internal` / `for...of null` class of bugs get caught. |
+| "The specs are the authority, so I should read them all before comparing" | NO. Indexing is not the same as loading. `apcore/`'s spec corpus is **1.6 MB / ~400 k tokens** (`PROTOCOL_SPEC.md` 713 KB + 23 feature specs 870 KB), and **71% of the feature-spec bytes are Overview / Requirements / Usage / Testing prose that no checklist item compares against**. The normative part is the 140 `## Contract:` blocks, 250 KB, and Step 4 needs exactly one module's worth at a time. Index in Step 3.1, slice in Step 4.0, discard per iteration. This lands in MAIN context — no sub-agent can absorb it for you. |
+| "This repo is too big for one extraction sub-agent — I'll split it by module/cluster/class" | NO. This is the single most expensive mistake available in this skill; it is what turned a 3-repo Phase A into 20+ sub-agents and exhausted a 5-hour quota. Each split agent re-reads the same barrel file, type definitions and shared helpers, so cost grows superlinearly in the number of splits while the extracted surface is unchanged. Size is handled by **writing the extraction to a file** (Step 2.1a), which removes the output ceiling entirely. One sub-agent per repo is a hard ceiling. |
+| "That sub-agent got rate-limited (429) — I should retry it" | NO. ABORT the run. The failed agent already spent its input tokens; a retry spends them again into a throttle that is likelier to reject it again, and the queued agents behind it will do the same. Persist completed units to the cache and stop, so a re-run resumes instead of restarting. A 429 retry cascade can burn a multi-hour quota and produce zero findings. See **Sub-agent Budget and Failure Policy** rule 4. |
+| "`--skip-docs` means this is the cheap, fast run" | NO. **Step 4C lives inside Phase A**, which `--skip-docs` does not touch — so the run still spawns one deep-chain sub-agent per module, usually the largest single contributor to its cost. `--skip-docs` drops only Step 6 (R+1 sub-agents; 4 on core scope) against 4C's one-per-module (22 on `apcore/`). The cheap run is `--deep-chain off`, or `--modules={a few}`. |
 | "4C spawns one sub-agent per module — one per *language* would be far cheaper" | NO, and it would delete the mechanism. A single-language sub-agent has no peer to diff against, so it can only return call graphs; the N-way diff then has to happen in the main context, which means M×N graphs land there instead of a handful of findings. The token math also does not work: total source read is M modules × N languages either way — slicing the same rectangle by language instead of by module does not shrink it. You would save M−N prompt-template instantiations and pay for it with the orchestrator's context. If 4C costs too much, cut **M** with `--modules` (4C.1b), cut **N** with `--lang`, or turn it off with `--deep-chain=off`. |
 | "The module's source file is obvious from its name — I'll just use `src/{module}.py`" | NO. Use `FILE_MAP` from Step 2 (4C.1 step 2). A guessed path that is wrong does not fail loudly: the sub-agent reads *some* valid file, builds well-formed graphs, writes plausible `confidence_notes`, and reports zero divergences. Every 4C.4 guard passes. The module is then reported as analyzed and clean while its actual source was never opened. A missing mapping must degrade visibly (unresolved → WARNING), never silently resolve to a plausible-looking path. |
 | "`--modules` narrows 4C, so narrowing Step 4 the same way would save even more" | NO — see 4C.1b. Step 4 produces `verified_api`, which Phase B consumes as the authority on what the API *is*. Narrow Step 4 and every doc referencing an uncompared symbol becomes a false finding against the docs, with nothing in the report indicating why. 4C is safe to narrow precisely because nothing downstream consumes it as truth. |
@@ -82,18 +86,18 @@ Unified consistency verification across all apcore ecosystem documentation and i
 ## Command Format
 
 ```
-/apcore-skills:sync [repo1,repo2,...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--strict] [--no-cache] [--save]
+/apcore-skills:sync [repo1,repo2,...] [--skip-docs] [--fix] [--scope core|mcp|integrations|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--strict] [--no-cache] [--save]
 ```
 
 | Argument / Flag | Default | Description |
 |------|---------|-------------|
 | positional repos | — | Comma-separated repo names to sync. See **Positional Repo Arguments** below. |
-| `--phase` | `all` | Which phase to run: `a` (spec vs implementation), `b` (documentation internal consistency), `all` (A then B) |
+| `--skip-docs` | off (docs are audited) | Skip **Phase B** — the documentation-consistency pass (Step 6: one sub-agent per doc repo + one per impl repo). Use it when you changed code and not docs. **It is a minor cost lever, not the cheap-run switch**: it drops R+1 sub-agents (4 on core scope) while `--deep-chain off` drops one per module (22 on `apcore/`). Reach for `--deep-chain off` first. |
 | `--fix` | off | Auto-fix issues (naming, stubs, doc references) |
-| `--scope` | **cwd** | Which group: `core`, `mcp`, `all`. **If omitted and no positional repos, defaults to the current working directory's repo only.** Use `--scope all` to scan all repos. |
+| `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all`. Values are the shared scope vocabulary from `shared/ecosystem.md` §0.3 — identical across every skill in this plugin. **If omitted and no positional repos, defaults to the current working directory's repo only.** `integrations` runs the documentation pass only: integration repos have no protocol spec to compare against, so Phase A is N/A for them (Step 1.2) — this is the same routing sync already applies when CWD is an integration repo, not a special case of the flag. |
 | `--lang` | all discovered | Comma-separated list of languages to compare |
 | `--internal-check` | `contract` | Internal consistency tier. `none` = public API only. `contract` = **DEFAULT** — also compare behavioral contracts (inputs validation, errors raised, side-effect order, return shape, properties) via Step 4B, static. `skeleton` = contract + algorithm checkpoint sequences (Step 4A, static, requires source instrumentation). `behavior` = all static tiers + hand off to `tester` skill for runtime behavioral equivalence (Step 7.5, dynamic). Higher tiers include lower tiers. Function-level (helper) identity is intentionally NOT supported — see Anti-Rationalization Table. |
-| `--deep-chain` | `on` | Cross-language deep-chain analysis (Step 4C). When on, the orchestrator spawns one sub-agent **per logical module** and feeds it all N languages' source side-by-side. The sub-agent diffs call graphs, finds missing-validation / missing-registration / defensive-gap divergences that shape-level extraction (4B) cannot see. Forced off when `--internal-check=none`. Set `--deep-chain off` for fast sync (reduces sub-agent count, loses intent-level chain coverage). |
+| `--deep-chain` | **`off`** | Cross-language deep-chain analysis (Step 4C). Set `--deep-chain on` to enable. **It is off by default because it is the most expensive operation in this plugin by an order of magnitude**: one sub-agent per logical module, each reading all N languages' source for that module and expanding call graphs — 22 modules on `apcore/`, an estimated ~4.4 M tokens for a cold run, roughly 3× everything else a full sync does combined. Turning it on for the whole ecosystem is a deliberate investigation, not a routine check; pair it with `--modules` (`--deep-chain on --modules=registry-system,core-executor` ≈ 2–3 agents). What you give up by leaving it off is **chain-level** divergence only — 4B still compares declared contract shape on every run at no extra sub-agent cost. |
 | `--modules` | all enumerated | Restrict **Step 4C only** to the named logical modules (comma-separated, matched against feature-spec module names — `registry`, `executor`, ...). This is the direct lever on 4C cost: 4C spawns one sub-agent per module, so cutting the module list cuts the dominant fan-out proportionally. It deliberately does **not** narrow Step 4 / 4A / 4B / Phase B — those stay full-surface, because a partial public-API comparison would silently corrupt `verified_api`, which Phase B consumes as truth. See 4C.1b. |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default sync suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), style-only naming nits (lint-suppression-style suggestions), and findings tagged `[verify-spec-first]` (where the recommendation depends on which spec version is authoritative). Pass `--strict` before a release sync when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker`, spec violations, missing API, and chain-level structural divergences (missing-validation / missing-registration / semantic-divergence) always surface regardless. Identical semantics to `apcore-skills:audit --strict` — see `shared/strict-suppression.md`. |
 | `--no-cache` | off (cache on) | Bypass the Step 2 / Step 4C extraction cache (`shared/ecosystem.md` §0.6b) and force every repo/module to re-run its sub-agent even if the cache would have hit. **This trades cost for nothing extra in coverage** — a cache hit is byte-identical to a fresh run for unchanged input, so `--no-cache` does not find anything a cached run would have missed. Use it only to recover from a suspected bad cache entry, or right after editing `references/extract-api-prompt.md` / `references/deep-chain-prompt.md` without bumping their `--extra` version tag. |
@@ -117,7 +121,7 @@ Each tier is **cumulative** — higher tiers include all lower tiers.
 
 **Contract tier is the default** because it answers the question "do all SDKs agree on what the method DOES?" without requiring any source instrumentation or test execution. It captures intent (logic/purpose) divergence that pure signature comparison misses. See `shared/contract-spec.md` for the `## Contract:` block format.
 
-**Deep-chain analysis (Step 4C, `--deep-chain on` by default) runs alongside every non-`none` tier.** It is **not** a `--internal-check` tier because it operates on a different axis: instead of comparing extracted **shape** (as contract/skeleton/behavior do), it compares actual **call graphs across languages**. A sub-agent reads all N languages' source for one module side-by-side and diffs the code directly. This catches bugs that shape extraction is structurally blind to (e.g., `for (const entry of customModules)` crashing on `null` when peer languages don't; internal methods skipping validation; maps missing an insert). See Step 4C.
+**Deep-chain analysis (Step 4C) is OFF by default; `--deep-chain on` enables it alongside any non-`none` tier.** It is **not** a `--internal-check` tier because it operates on a different axis: instead of comparing extracted **shape** (as contract/skeleton/behavior do), it compares actual **call graphs across languages**. A sub-agent reads all N languages' source for one module side-by-side and diffs the code directly. This catches bugs that shape extraction is structurally blind to (e.g., `for (const entry of customModules)` crashing on `null` when peer languages don't; internal methods skipping validation; maps missing an insert). See Step 4C.
 
 **Function-level identity (helper names / count / decomposition) is explicitly NOT a tier.** It conflicts with each language's design philosophy (Rust ownership splits, Go's no-default-args, Python list comprehensions) and produces noise rather than signal.
 
@@ -166,16 +170,32 @@ Implementation repos contain only code and a README. They do NOT contain PRD/SRS
 
 **All per-repo AND per-module operations use parallel sub-agents.** The main context ONLY handles:
 1. Orchestration — determining scope, phase, enumerating modules, tracking per-module progress, spawning sub-agents
-2. Spec reference — reading the documentation repo (lightweight, structured docs)
-3. Comparison logic — building and evaluating the checklist from structured summaries
+2. Spec reference — **indexing** the documentation repo, then reading it in per-module slices (Step 3). It is NOT lightweight: measured 1.6 MB across `PROTOCOL_SPEC.md` + 23 feature specs. Never load it whole.
+3. Comparison logic — evaluating the checklist **one module at a time** (4.0), reading slices of both the spec (3.2) and the per-repo extraction files (2.1b), and discarding each module's slices before the next. Never hold the whole spec or every repo's full extraction at once.
 4. Phase sequencing — Phase A must complete before Phase B begins
 5. Reporting — formatting combined results
 
 Parallelism fan-out:
-- **Step 2** — one sub-agent per **cache-miss** implementation repo (per-repo, simultaneous) for public API extraction. A repo whose relevant source is unchanged since the last run is served from the extraction cache instead — see 2.0.
+- **Step 2** — one sub-agent per **cache-miss** implementation repo, **capped at 1 per repo and 3 concurrent** (2.1). Each writes its extraction to a file and returns a <2 KB receipt (2.1a). A repo whose relevant source is unchanged since the last run is served from the extraction cache instead — see 2.0.
 - **Step 4C** — one sub-agent per **cache-miss logical module** (cross-language — each sub-agent reads all N languages' source for its module), dispatched in batches by the orchestrator with bounded concurrency. Progress table is maintained in main context. A module whose source + spec Contract are unchanged since the last run is served from the extraction cache instead — see 4C.2.0.
 - **Step 6** — one sub-agent per documentation repo + one per implementation repo (simultaneous) for documentation auditing
 - **Step 10** — one sub-agent per repo with fixable findings (simultaneous)
+
+## Sub-agent Budget and Failure Policy
+
+@../shared/subagent-policy.md
+
+**sync-specific bindings of that policy:**
+
+| Policy | sync's binding |
+|---|---|
+| P1 announce | `Step 2 = {R_miss}` (one per cache-miss repo) · `Step 4C = {M_miss}` (one per cache-miss module) · `Step 6 = {R+1}` (skipped when `--skip-docs`) |
+| P2 ceiling | **40**. Flags that reduce it, most effective first: `--deep-chain off`, `--modules`, `--lang`, `--skip-docs` |
+| P3 unit | Step 2 = one per repo · Step 4C = one per module · Step 6 = one per repo |
+| P4 concurrency | Step 2 batches of 3 (2.1) · Step 4C batches of 5 (4C.2.1) |
+| P5 abort | Persist via `extract_cache.py put` (2.2 / 4C.2.2) before aborting, so a re-run resumes from cache |
+| P7 receipts | 2.1a — extraction to `.apcore-skills-cache/sync/api/{repo}.extraction.md`, reply < 1 KB |
+| P8 stdout | 2.0 — `extract_cache.py check --out-file` is **mandatory** |
 
 **Extraction cache (Step 2, Step 4C).** On a repeat sync where most repos/modules haven't changed since the last run, this is the dominant lever for reducing sub-agent count — a re-run of an ecosystem-scale sync (many repos × many modules) can skip the large majority of Step 2/4C sub-agent calls entirely while producing byte-identical results for the unchanged portions. It is lossless (content-hash keyed, `shared/ecosystem.md` §0.6b) and ON by default; pass `--no-cache` only to force a full re-run. This does not reduce what Step 4/4A/4B/6 evaluate — every symbol and module still gets a checklist row and a finding decision, whether the underlying extraction came from a fresh sub-agent or a cache hit.
 
@@ -202,7 +222,7 @@ Filter repos based on `--scope` and `--lang` flags. Identify documentation repos
 ### Step 1: Parse Arguments and Determine Scope
 
 Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
-- Active phases (a, b, or both)
+- **`SKIP_DOCS`** — `true` if `--skip-docs` appears, else `false`. Phase B runs unless it is `true`. Every later check tests `SKIP_DOCS`, never the raw flag text, so the alias cannot drift.
 - Scope groups and language filter
 - Fix mode
 - Target repos (from positional args, `--scope`, or CWD)
@@ -276,35 +296,116 @@ Verify that the documentation repo's feature specs and protocol spec match what 
 ```
 python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
     --kind api --key {repo_name} --repo-dir {repo_path} --lang {language} \
-    --extra "sync-extract-v2"
+    --extra "sync-extract-v3" \
+    --out-file {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
 ```
 
-**Tag history.** `sync-extract-v2` supersedes `sync-extract-v1`: the extraction output gained the mandatory `FILE_MAP` section (`references/extract-api-prompt.md`), so every `v1` entry lacks a field Step 4C.1 now depends on. The bump is what forces those entries to be re-extracted instead of being served as structurally-valid-but-incomplete hits — 2.0's hit path does not validate individual fields.
+**Tag history.**
+- `v2` superseded `v1`: the output gained the mandatory `FILE_MAP` section, which Step 4C.1 depends on.
+- `v3` supersedes `v2`: each method's `contract` gained **`errors_propagated`** and **`propagation_truncated`** (`api-extraction-protocol.md` E.4b). A `v2` entry has neither field, while Step 4B and audit D10 now compare them — served as a hit, every symbol would read as "nothing propagated" rather than "not extracted", turning a missing field into a false agreement.
+
+The bump is what forces re-extraction instead of serving structurally-valid-but-incomplete hits — 2.0's hit path does not validate individual fields. **This one costs a full re-extraction** (~1.07 M tokens for the three core SDKs, measured). That is the honest price of the schema change; serving `v2` data into a `v3` comparison would be caching "probably fine", which §0.6b explicitly rules out.
 
 **Before the first `check`/`put` call of the run:** if `{ecosystem_root}` is (or is inside) a git repo and its `.gitignore` does not already contain `.apcore-skills-cache/` (or a pattern that covers it, e.g. `.apcore-skills-cache`), append that line. Do this once per run, not once per repo — it is the actual point the cache directory gets created, so this is where the ecosystem.md §0.6b guidance must be executed, not just documented.
 
 **If `python3` is unavailable, or `extract_cache.py` errors:** treat every repo as a cache miss and proceed with normal 2.1 sub-agent dispatch — never block sync on the cache being unavailable (same fallback discipline as `discover.py`, `shared/ecosystem.md` §0.1).
 
 For each repo, this returns in well under a second (it hashes local files, no LLM call):
-- `{"status": "hit", "hash": ..., "data": "<cached extraction summary>"}` — treat `data` exactly as if a fresh sub-agent had just returned it. Store into `api_summaries[repo_name]` and print `[Step2] {repo}: cache hit (unchanged since {cached_at}) — extraction skipped`. Do NOT spawn a sub-agent for this repo.
+- `{"status": "hit", "hash": ..., "data_file": ..., "bytes": N}` — `--out-file` has already written the cached payload to that path; set `api_summaries[repo_name]` to it, so a hit and a miss leave downstream steps in the identical shape (2.1b reads paths, never inline content). Read only the `EXTRACTION_VERIFICATION` block out of the file into context — that one is small and the gate needs it. Leave `FILE_MAP` on disk; Step 4C.1 reads it by line range when (and only when) deep-chain runs. Print `[Step2] {repo}: cache hit (unchanged since {cached_at}) — extraction skipped`. Do NOT spawn a sub-agent for this repo.
+
+  ⚠️ **`--out-file` is mandatory here, not optional.** Without it, `check` prints the entire cached payload to stdout — measured 308/341/292 KB for the three core SDKs, ~941 KB straight into main context. That makes a cache HIT roughly 1200× more expensive than a MISS (which returns a ~1 KB receipt), inverting the entire point of the cache. With `--out-file` the three hits cost 785 bytes of stdout in total.
 - `{"status": "miss", "hash": ...}` — no cached entry, or source changed since the last run. Keep `hash` for 2.2; this repo goes into the sub-agent batch below.
 
 `--no-cache` (flag on the `/apcore-skills:sync` command) forces every repo to `miss` — use it to force a full re-extraction (e.g. after suspecting a bad cache entry, or after editing `references/extract-api-prompt.md` without bumping the `--extra` tag).
 
-**2.1** Spawn one `Agent(subagent_type="general-purpose")` **per cache-miss implementation repo, all simultaneously in a single round of parallel Agent calls**. Each sub-agent extracts the public API from one repo independently. Do NOT process repos sequentially. If every repo was a cache hit, skip straight to 2.2's bookkeeping — zero sub-agents needed this run.
+**2.1** Spawn one `Agent(subagent_type="general-purpose")` **per cache-miss implementation repo** — exactly one, never more — in batches of **at most 3 simultaneously**. Each sub-agent extracts the public API from one repo independently. If every repo was a cache hit, skip straight to 2.2's bookkeeping — zero sub-agents needed this run.
 
-**Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`, filling in `{repo_path}` and `{package}` for each repo.
+**⚠️ ONE SUB-AGENT PER REPO IS A HARD CEILING, NOT A STARTING POINT.** Do NOT split a
+repo's extraction across several sub-agents — not by module, not by "cluster", not
+by class, not to work around a repo being large. A real SDK in this ecosystem has
+hundreds of public symbols across ~100 source files (measured: `apcore-python`
+285 `__all__` entries / 91 files, `apcore-rust` 78 crate-root re-exports over 83
+files / 55k lines, `apcore-typescript` 82 index exports / 100 files). Splitting on
+size is how a 3-repo Phase A becomes 20+ sub-agents, and because each split agent
+re-reads the shared barrel/type files, the token cost grows *superlinearly* in the
+number of splits while the extracted surface stays the same.
 
-**2.2** After each sub-agent returns AND the Extraction coverage gate below has evaluated `extraction_coverage[repo_name]` for it, write the output back to the cache **only if the repo cleared the gate with no coverage WARNING** (module/re-export coverage == 100% AND source-file coverage ≥ 80% AND the `EXTRACTION_VERIFICATION` block is present AND the `FILE_MAP` section is present):
+**A repo too large for one pass is handled INSIDE the sub-agent, by writing to disk
+rather than by cloning the sub-agent.** See 2.1a.
+
+**2.1a Extraction output goes to a file, not into the reply.** Each sub-agent writes
+its full extraction to:
+
+```
+{ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+```
+
+and returns **only a receipt** — the `EXTRACTION_VERIFICATION` block, the output
+path, the line range where `FILE_MAP` sits inside that file, and its symbol /
+unresolved counts. Target for the reply: **under 1 KB**, regardless of repo size.
+
+**`FILE_MAP` stays in the file; it is NOT part of the receipt.** It scales with the
+repo — measured at 7.5 KB for `apcore-python` (285 symbols / 91 files) — so putting
+it in the reply recreates the very ceiling 2.1a exists to remove, one layer up.
+Read it out of the file by line range, lazily, only when a step actually needs it:
+that is Step 4C.1, which does not run at all under `--deep-chain=off`.
+
+This is what makes "one sub-agent per repo" physically achievable. The previous
+design required the sub-agent to return the entire extraction inline while E.4b
+mandates a ~500-byte behavioral contract *per method*; at 285 public symbols that
+is >100 KB of required output against a stated 3–6 KB reply target — a 20–50×
+contradiction with no legal solution. Faced with it, an orchestrator has only two
+moves: under-extract (which the coverage gate below loudly forbids) or subdivide
+into per-cluster sub-agents (which is what actually happened, and what burned a
+full rate-limit window). Writing to a file removes the ceiling instead of making
+the sub-agent choose which rule to break.
+
+The sub-agent may append to that file incrementally as it walks the module tree, so
+its own context never has to hold the whole extraction either.
+
+**Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`,
+filling in `{repo_path}`, `{package}`, and `{output_path}` for each repo.
+
+**2.1b Downstream reads the file, in slices.** Steps 3/4/4A/4B read
+`api_summaries[repo_name]` as a **path**, not as inline content. When comparing, read
+only the slice needed for the symbols currently on the checklist (the `FILE_MAP`
+receipt tells you which file holds what). Do NOT open all repos' full extractions
+into main context at once — that reintroduces the same ceiling one layer up.
+
+**2.2** After each sub-agent returns AND the Extraction coverage gate below has evaluated `extraction_coverage[repo_name]` for it, write the output back to the cache **only if the repo cleared the gate with no coverage WARNING** (module-tree coverage == 100% AND re-export coverage == 100% AND **symbol-defining** file coverage == 100% AND the `EXTRACTION_VERIFICATION` block is present AND the receipt reports `FILE_MAP_LINES`) — note the raw file-coverage percentage is deliberately **not** part of this condition, see the gate table below:
 
 ```
 python3 <scripts_dir>/extract_cache.py put --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
-    --kind api --key {repo_name} --hash {hash_from_2.0} --data-file <path-to-file-holding-the-sub-agent's-raw-output>
+    --kind api --key {repo_name} --hash {hash_from_2.0} --data-file {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
 ```
 
 If a repo's extraction triggered any coverage WARNING, do NOT `put` it — leave the cache entry as-is (miss again next run, giving the repo another independent attempt to reach full coverage rather than freezing a partial result). This mirrors 4C.2.2's "never cache a `failed` module" rule.
 
-**Main context retains:** Each repo's structured API summary (from cache or from a fresh sub-agent — identical downstream handling either way). Store as `api_summaries[repo_name]`.
+**Main context retains:** for each repo, the **path** to its extraction file, its `EXTRACTION_VERIFICATION` block, and the `FILE_MAP` line range + counts. Store the path as `api_summaries[repo_name]` (cache hit and fresh sub-agent are identical here, per 2.0). The signature/contract body **and `FILE_MAP`** stay on disk, read in slices by Step 4 (2.1b) and Step 4C.1; do not load either wholesale.
+
+**2.2a Structural validation of the extraction file (MANDATORY, local, no LLM call).**
+The coverage gate below reads the sub-agent's *self-report*. Validate the artefact
+too — a receipt claiming 100% is not evidence the file matches it:
+
+```
+grep -c '^FILE_MAP:'           {file}   # must be exactly 1
+grep -c '^EXTRACTION_VERIFICATION:' {file}   # must be exactly 1
+awk '/^FILE_MAP:/,0' {file} | grep -cE '^- '  # defining files, sanity-check vs receipt
+```
+
+Symbol count parsed out of `FILE_MAP` must be within 5% of the receipt's `SYMBOLS`.
+Outside that, or a missing/duplicated `FILE_MAP:` / `EXTRACTION_VERIFICATION:`
+header → treat as a malformed extraction: WARNING `[A-EXT-{seq}] extraction file
+for {repo} failed structural validation ({detail})`, and do NOT cache it.
+
+Repeated `CLASSES:` / `FUNCTIONS:` / `ERRORS:` headers are **normal** — they are how
+incremental appending looks (see the prompt template). Union every occurrence; never
+`grep -A` from the first one and assume you have the section. Only the four
+single-instance headers above are checked for uniqueness.
+
+This check costs one grep per repo and catches the failure the coverage gate
+structurally cannot: a sub-agent that reports honestly but writes a file the
+downstream steps cannot parse.
 
 **Extraction coverage gate (MANDATORY — before Step 3).** Each repo's summary — whether from a fresh sub-agent or a 2.0 cache hit (the cached `data` is the prior sub-agent's verbatim output, coverage block included) — carries an `EXTRACTION_VERIFICATION` block (Step E.5). Read it; do not skip straight to comparison. Every later phase compares against whatever surface Step 2 produced, so a partial extraction makes the entire Phase A result wrong in a way no downstream check can detect — the symbols simply are not there to be missing.
 
@@ -313,10 +414,11 @@ For each repo, store `extraction_coverage[repo_name]` and act on it:
 | Signal | Action |
 |---|---|
 | Module tree or re-export coverage < 100% | Emit WARNING `[A-EXT-{seq}] extraction incomplete for {repo} — {N} of {M} modules scanned; Phase A findings for this repo may be missing symbols`. Continue. |
-| Source-file coverage < 80% | Same WARNING form, citing the file percentage. Continue. |
+| **Symbol-defining** file coverage < 100% | Emit WARNING `[A-EXT-{seq}] extraction for {repo} read {N} of {M} symbol-defining files — Phase A findings for this repo may be missing symbols`. Continue. **Blocks caching.** |
+| Raw file coverage low (e.g. 79%) while symbol-defining coverage is 100% | **Not a finding.** Files that define no public symbol are correctly skipped; gating on the raw number would make a normal repo re-extract on every run forever. Record the number in the report, emit nothing, and cache normally. |
 | `EXTRACTION_VERIFICATION` block absent entirely | Emit WARNING `[A-EXT-{seq}] sub-agent for {repo} returned no extraction verification — coverage unknown, treat this repo's Phase A results as unverified`. Do NOT silently accept. |
-| `FILE_MAP` section absent entirely | Emit WARNING `[A-EXT-{seq}] extraction for {repo} returned no FILE_MAP — Step 4C cannot route any of this repo's symbols to a sub-agent`. **Blocks caching** (2.2): a missing section means the sub-agent skipped the work, and a fresh attempt may well succeed. Continue — Step 4C.1 degrades per-module (see 4C.1 step 2), it does not abort. |
-| `FILE_MAP` present but some symbols listed as `(unresolved)` | Emit WARNING `[A-EXT-{seq}] {N} of {M} symbols in {repo} have no resolvable defining file ({symbols}) — Step 4C will under-report divergences for them`. **Does NOT block caching.** An unresolvable symbol (generated code, dynamic registration) is usually a permanent property of the source, not a transient extraction failure; blocking the cache on it would re-spawn this repo's sub-agent on every run forever while changing nothing. The warning still surfaces on each cache hit, because the gate re-reads the cached `EXTRACTION_VERIFICATION` block. |
+| `FILE_MAP` section absent from the extraction file (receipt reports no `FILE_MAP_LINES`) | Emit WARNING `[A-EXT-{seq}] extraction for {repo} returned no FILE_MAP — Step 4C cannot route any of this repo's symbols to a sub-agent`. **Blocks caching** (2.2): a missing section means the sub-agent skipped the work, and a fresh attempt may well succeed. Continue — Step 4C.1 degrades per-module (see 4C.1 step 2), it does not abort. |
+| `FILE_MAP` present but the receipt reports `UNRESOLVED > 0` | Emit WARNING `[A-EXT-{seq}] {N} of {M} symbols in {repo} have no resolvable defining file ({symbols}) — Step 4C will under-report divergences for them`. **Does NOT block caching.** An unresolvable symbol (generated code, dynamic registration) is usually a permanent property of the source, not a transient extraction failure; blocking the cache on it would re-spawn this repo's sub-agent on every run forever while changing nothing. The warning still surfaces on each cache hit, because the gate re-reads the cached `EXTRACTION_VERIFICATION` block. |
 | A `FILE_MAP` path does not exist on disk | Emit WARNING `[A-EXT-{seq}] FILE_MAP for {repo} cites {path}, which does not exist — treating the symbols on that line as unresolved`. Drop the line rather than passing a bad path to Step 4C. This is a cheap local `test -f`, not a sub-agent call; run it for every path. |
 
 These warnings carry into the Phase A report (Step 5) and the combined report (Step 9) under the `A-` namespace. A repo whose extraction was incomplete must never be reported as "0 findings" without the accompanying coverage warning — a clean result on a partial surface is the failure mode this gate exists to catch.
@@ -325,17 +427,56 @@ These warnings carry into the Phase A report (Step 5) and the combined report (S
 
 ---
 
-### Step 3: Load Documentation Repo Reference
+### Step 3: Index the Documentation Repo (DO NOT LOAD IT)
 
-For each documentation repo in scope, read the authoritative specs:
+⚠️ **Never read the spec corpus wholesale.** Measured on `apcore/`:
+`PROTOCOL_SPEC.md` is 713 KB / 10,441 lines and `docs/features/*.md` is 870 KB
+across 23 files — **~1.6 MB, roughly 400 k tokens, into main context**, which no
+sub-agent can absorb for you because Step 4's comparison *is* main-context work.
+Loading it is the second half of the same failure that exhausts a quota; Step 2's
+write-to-disk fix does nothing for it.
 
-**For `apcore/` (core scope):**
-1. Read `{doc_repo_path}/PROTOCOL_SPEC.md` — extract the API contract sections
-2. Scan `{doc_repo_path}/docs/features/*.md` — extract per-feature API definitions (classes, functions, parameters, return types, **trait/interface contracts**, **multi-constructor patterns**)
-3. If `{doc_repo_path}/docs/tech-design.md` (or `docs/tech-design/*.md`) exists — extract any internal interface contracts marked as normative. Tag them with `internal_contract: true` so Step 4A knows they apply to internal symbols, not just public API.
-4. From each feature spec, parse any `## Algorithm` section — extract the ordered checkpoint list for each public method. Store as `spec_skeletons[scope][symbol] = [checkpoint_1, checkpoint_2, ...]`. This is the input for Step 4A.
-4b. **From each feature spec, parse any `## Contract:` section** — extract the behavioral contract per `shared/contract-spec.md`. For each spec Contract block, capture `{inputs[], preconditions[], side_effects[], postconditions[], errors[], returns, properties{}}`. Store as `spec_contracts[scope][symbol] = {...}`. This is the input for Step 4B.
-5. If `{doc_repo_path}/docs/spec/type-mapping.md` exists — load cross-language type mappings
+The corpus is highly sliceable, and only a minority of it is normative for
+comparison. Measured: of the 870 KB of feature specs, **250 KB (29%) is
+`## Contract:` blocks — 140 of them — and the other 620 KB (71%) is Overview /
+Requirements / Technical Design / Usage / Testing prose that Step 4 never
+compares against.**
+
+**3.1 Build the index (cheap, no file bodies).**
+
+```
+grep -n '^## Contract: ' {doc_repo_path}/docs/features/*.md
+grep -n '^## '           {doc_repo_path}/PROTOCOL_SPEC.md
+```
+
+Store `spec_index`:
+- `spec_index.modules[module]` = `{spec_file, contract_blocks: [{symbol, start_line, end_line}]}`
+  — one module per feature-spec file; `end_line` is the next `^## ` heading minus one.
+- `spec_index.protocol_sections` = `[{title, start_line, end_line}]` from `PROTOCOL_SPEC.md`.
+
+That is ~140 rows plus ~24 — a few KB total. **This index, not the spec text, is what
+Step 3 leaves in context.**
+
+**3.2 Read spec text only in slices, only when a step needs it.**
+- Step 4's per-module loop (4.0) reads one module's `contract_blocks` ranges — ~10–30 KB — and discards them before the next module.
+- `PROTOCOL_SPEC.md` sections are read **on demand, by title**, for the checklist items that actually cite them:
+
+  | Checklist need | Section to slice |
+  |---|---|
+  | Naming convention normalization (4.1) | `## 2. Naming Specification` |
+  | Error class / code checks (4.2) | `## 8. Error Handling Specification` |
+  | Config option checks (4.2) | `## 9. Configuration Specification` |
+  | Version / compatibility checks | `## 13. Versioning` |
+
+  `PROTOCOL_SPEC.md` contains **zero** `## Contract:` blocks (verified) — it is
+  normative prose, not the symbol-level authority. The feature specs' Contract
+  blocks are. Do not read it looking for per-symbol signatures.
+
+**3.3 Remaining doc-repo inputs (unchanged, all small):**
+1. If `{doc_repo_path}/docs/tech-design.md` (or `docs/tech-design/*.md`) exists — extract any internal interface contracts marked as normative. Tag them `internal_contract: true`.
+2. `## Algorithm` sections — index them the same way (`grep -n '^## Algorithm'`) and slice per module in 4A. **Measured on `apcore/`: 0 of 23 feature specs contain one.** Combined with 0 `checkpoint:` markers in all three SDKs, `--internal-check=skeleton` is a no-op on this ecosystem — Step 4A will skip every method. Say so once in the report rather than emitting 140 "no spec skeleton declared" INFO findings.
+3. `## Contract:` blocks are **not** parsed here — only indexed (3.1). Step 4's per-module loop parses each block per `shared/contract-spec.md` into `{inputs[], preconditions[], side_effects[], postconditions[], errors[], returns, properties{}}` when it slices that module, and discards it after. Holding all 140 parsed contracts at once is ~250 KB and defeats the point of the index.
+4. If `{doc_repo_path}/docs/spec/type-mapping.md` exists — load cross-language type mappings (small, load fully)
 
 **For `apcore-mcp/` (mcp scope):**
 1. Scan `{doc_repo_path}/docs/features/*.md` — extract per-feature API definitions, `## Algorithm` checkpoint sections, **and `## Contract:` behavioral contract sections**
@@ -343,9 +484,8 @@ For each documentation repo in scope, read the authoritative specs:
 3. If a protocol or spec file exists — extract the API contract
 
 Store as:
-- `spec_api[scope]` — canonical API surface (signatures)
-- `spec_skeletons[scope][symbol]` — algorithm checkpoint sequences
-- `spec_contracts[scope][symbol]` — behavioral contracts (inputs validation, errors, side effects, properties)
+- `spec_index` — the index from 3.1. **This is the only spec artefact that persists across the whole run.**
+- `spec_api[scope][module]`, `spec_contracts[scope][module]`, `spec_skeletons[scope][module]` — populated **one module at a time** by Step 4.0's loop and dropped when that module's checklist is evaluated. They are never all resident at once.
 
 All three must be matched by implementations. If a public method has no `## Contract:` block in any feature spec, Step 4B still runs — it compares across implementations (cross-repo mode) and emits a `warning` finding `"no spec Contract declared for {method} — compared across repos only"` pointing to the doc repo.
 
@@ -377,17 +517,56 @@ If a feature spec has no `## Algorithm` section for a given method, Step 4A skip
 
 @../shared/api-extraction.md
 
-Build an explicit per-symbol checklist and evaluate every single item. No shortcuts.
+Build an explicit per-symbol checklist and evaluate every single item. No shortcuts — but evaluate it **one module at a time** (4.0), never as one ecosystem-wide pass.
 
-Step 4 has four substeps that run in order:
-- **4.1–4.3** — signature / type / naming checklist (always runs)
+Step 4 has these substeps:
+- **4.0** — the per-module streaming loop that drives everything below (always runs; see it first)
+- **4.0b** — final name-set reconciliation for symbols no Contract block covers
+- **4.1–4.3** — signature / type / naming checklist, evaluated **inside** each 4.0 iteration (always runs)
 - **4A** — skeleton checkpoint comparison (runs only when `--internal-check` is `skeleton` or `behavior`)
 - **4B** — contract parity (runs by default — `--internal-check` is `contract`, `skeleton`, or `behavior`)
-- **4C** — cross-language deep-chain analysis (runs when `--deep-chain=on` AND `--internal-check != none`; default is on)
+- **4C** — cross-language deep-chain analysis (runs only when `--deep-chain on` AND `--internal-check != none`; **default is off** — when it does not run, 4C.0's disclosure block is mandatory)
 
-#### 4.1 Build the Master Checklist
+#### 4.0 Stream module by module (THE EXECUTION SHAPE OF STEP 4)
 
-From `spec_api` and all `api_summaries`, construct a union of all symbols. Apply canonical name normalization for matching, **differentiated by symbol kind**:
+Step 4 does **not** build one master checklist over the whole ecosystem. It runs a
+loop, and the memory discipline is the point:
+
+```
+for module in spec_index.modules:            # 23 on apcore/
+    spec_slice  = read(module.spec_file, module.contract_blocks)   # ~10-30 KB
+    impl_slices = [read_symbols(api_summaries[r], module.symbols)  # 3 x small
+                   for r in impl_repos]
+    rows        = evaluate(4.1 - 4.3, spec_slice, impl_slices)
+    findings   += [r for r in rows if r.status != PASS]
+    counters   += tally(rows)                # PASS rows collapse to counts
+    DISCARD spec_slice, impl_slices, rows    # <-- before the next iteration
+```
+
+**Peak context is one module, not the ecosystem** — ~30 KB of spec plus three symbol
+slices, against 1.6 MB of spec plus 941 KB of extraction if loaded whole. Carrying a
+module's slices past its iteration silently rebuilds the monolith one module at a
+time, which is the failure this shape exists to prevent.
+
+**Keep per module:** the finding rows (FAIL/WARN only) and the PASS *counts*. A PASS
+row's evidence is not retained — it is summarised into `Checklist: {N} items | PASS:
+{n}` for the report. FAIL/WARN rows keep their full evidence because the report
+expands them.
+
+**Symbols with no `## Contract:` block** are not covered by the loop above. Catch them
+in a single final pass (4.0b) that compares **symbol-name sets only**, reading each
+repo's `FILE_MAP` (by the line range in its receipt) rather than any extraction body:
+- in `spec_api` but in no implementation → missing API, `critical`
+- in an implementation but in no feature spec → undocumented extra, `warning` (Anti-Rationalization Table: undocumented extras indicate drift)
+- name-set sizes that diverge across repos — measured here: python 285, typescript 336, rust 398 — are the signal to look for, not a finding in themselves; they are reconciled per symbol by the two rules above.
+
+This pass is name-only and therefore cheap; do not pull signatures for it.
+
+#### 4.1 Evaluate one module's checklist
+
+Within a single 4.0 iteration, construct the union of that module's symbols from
+`spec_slice` and the three `impl_slices`. Apply canonical name normalization for
+matching, **differentiated by symbol kind**:
 
 **Classes / Types / Enums / Interfaces** → normalize to `PascalCase`:
 - Python, TypeScript, Go, Rust, Java, C#, Kotlin, Swift, PHP: `PascalCase` (pass through)
@@ -517,8 +696,8 @@ The literal prefix is `checkpoint:` followed by a snake_case identifier. Sub-age
 - No other skip conditions. Unlike skeleton, contract tier runs even when the spec declares no Contract block — in that case it runs in **cross-repo mode** (compare implementations against each other) and emits a `warning` that spec is incomplete.
 
 **Inputs to this step:**
-- `spec_contracts[scope][symbol]` from Step 3 (may be empty or partial)
-- `repo_contracts[repo_name][symbol]` — flattened from each sub-agent's `contract` field on every method/function (see Step 2 and `shared/api-extraction-protocol.md` E.4b)
+- `spec_contracts[scope][module][symbol]` for the module currently being evaluated — parsed from that module's spec slice inside the 4.0 loop, not from a globally resident map (Step 3.3). May be empty or partial.
+- `repo_contracts[repo_name][symbol]` — read from each repo's extraction file for this module's symbols only (2.1b), from the `contract` field on every method/function (see Step 2 and `shared/api-extraction-protocol.md` E.4b)
 
 **Comparison rules.** For each `(symbol, repo)` pair:
 
@@ -526,7 +705,7 @@ The literal prefix is `checkpoint:` followed by a snake_case identifier. Sub-age
    - If spec declares Contract: for each spec input, every repo must have a matching `{condition, reject_with}` entry. Missing validation → FAIL `critical` `"Repo {R} method {M} does not reject {param} when {condition} — spec requires reject_with={ErrorType}"`. Wrong error type → FAIL `critical`. Condition phrasing differs → `info` (the important thing is that the rejection exists with the correct error).
    - If spec is silent: cross-repo comparison. If any repo has a validation that another repo lacks for the same parameter, flag as `critical` `"Repo {R1} rejects {param} when {cond} (raises {E}) but repo {R2} does not — intent divergence"`.
 
-2. **Errors raised parity.**
+2. **Errors raised parity.** Compare `errors_raised` against `errors_raised`, and `errors_propagated` against `errors_propagated` — **never across the two** (`api-extraction-protocol.md` E.4b). A symbol whose error sits in `errors_raised` for one repo and `errors_propagated` for another differs by **where the helper boundary was drawn**, not by behaviour: emit `info`, never `critical`. If either side has `propagation_truncated: true`, that symbol's error comparison is `inconclusive`, not a pass.
    - Spec-declared: the set of error types raised by each repo must equal the spec's `### Errors` set. Extra error → `warning` `"Repo {R} raises {E} from {M} which is not in spec contract"`. Missing error → FAIL `critical`. Error code mismatch (error type name matches but code differs) → FAIL `critical`.
    - Spec silent: set equality across repos. Any divergence → `critical`.
 
@@ -587,7 +766,33 @@ This keeps `location` as a single string (compatible with `/code-forge:fix --rev
 
 ---
 
-#### 4C: Cross-Language Deep-Chain Analysis (DEFAULT ON — unless --deep-chain=off or --internal-check=none)
+##### 4C.0 Disclosure when deep-chain does NOT run (MANDATORY)
+
+A default-off capability that says nothing when it is off becomes dead code: nobody
+remembers it exists, and a report with no deep-chain section reads exactly like a
+report where deep-chain found nothing. **Those two must never look the same.**
+
+Whenever Step 4C is skipped — for any reason, including the default — emit this block
+into the Phase A report, in the position the deep-chain section would have occupied:
+
+```
+Cross-language deep-chain: NOT RUN ({reason})
+  {N} modules were not analyzed for chain-level divergence: {module names, or a count if >8}
+  Still covered this run: Step 4 (signatures/types/naming) and Step 4B (declared
+  contract shape — validation, errors, side-effect order, return shape, properties).
+  NOT covered: divergences visible only by reading the code — a validation call one
+  language omits, a null-guard peers have, a map one language forgets to update.
+  To check a module: /apcore-skills:sync {scope} --deep-chain on --modules={module}
+```
+
+`{reason}` is one of `default` / `--internal-check=none` / `<2 implementations in scope`.
+
+This block is **not** an INFO finding and must not be suppressed by lean mode, the
+Step 9.0 noise-control pass, or a zero-findings summary. It is a statement about the
+audit's coverage, in the same family as the `A-EXT-` and `A-DS-` namespaces: it
+describes what was not looked at, which is never noise.
+
+#### 4C: Cross-Language Deep-Chain Analysis (DEFAULT OFF — requires --deep-chain on, and --internal-check != none)
 
 **Purpose.** The preceding substeps (4, 4A, 4B) all compare **extracted shapes** — signatures, checkpoint lists, contract tuples. Shape extraction is structurally blind to a class of bugs where the shape matches across languages but the **actual code inside the method** diverges:
 
@@ -601,7 +806,7 @@ Step 4C fills this gap by dispatching **one sub-agent per logical module** that 
 **Scope and boundary.** Step 4C does NOT perform a full single-repo code review — that is `code-forge:review`'s job. Step 4C is ONLY a **cross-language call-chain diff**: it reports divergences between languages for the same public method. Shared bugs (all N languages have the same defensive gap) are out of scope — run `code-forge:review` per-repo to catch those.
 
 **Skip conditions:**
-- `--deep-chain=off` → skip entire substep with INFO finding `"deep-chain analysis disabled by flag"`
+- `--deep-chain` not set to `on` (the default) → skip entire substep and emit the MANDATORY disclosure block described in 4C.0 below
 - `--internal-check=none` → forced off, skip with INFO finding
 - Only 1 implementation repo in scope (no peer to diff against) → skip with INFO finding `"deep-chain requires ≥2 implementations, only {repo} in scope"`
 
@@ -651,8 +856,15 @@ python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcor
     --kind deepchain --key {module_name} \
     --paths {source_files_per_lang flattened to a list} \
     --extra "sync-deepchain-v2" --extra "{spec_contract text or '(none)'}" --extra "{sorted public_symbols joined}" \
-    --extra "{this module's verified_api rows from Step 4.4, joined}"
+    --extra "{this module's verified_api rows from Step 4.4, joined}" \
+    --out-file {ecosystem_root}/.apcore-skills-cache/sync/deepchain/{module_name}.json
 ```
+
+**`--out-file` is mandatory here too** (`shared/subagent-policy.md` P8). Without it the
+cached findings payload prints to stdout on every hit, and with one entry per module
+that is M payloads landing in main context for a run that was supposed to skip the work
+entirely. The shape validation below reads the **file**, not stdout — it is a local
+JSON parse either way, and parsing it from disk costs the orchestrator nothing.
 
 The cache key deliberately hashes the module's exact source files **plus** its spec Contract block, symbol list, and verified-API rows — a spec-only edit (no code change) still invalidates the cache, because 4C Step 5 compares against `{spec_contract}` and the sub-agent prompt also receives `{verified_api}` as context (4C.2.1 point 2).
 
@@ -662,8 +874,8 @@ The cache key deliberately hashes the module's exact source files **plus** its s
 
 **If `python3` is unavailable, or `extract_cache.py` errors:** treat every module as a cache miss and proceed with normal 4C.2.1 batch dispatch — never block sync on the cache being unavailable.
 
-- `{"status": "hit", ...}` — **before accepting**, parse `data` as JSON and validate it has the same required shape 4C.2.1 point 4 checks (`module`, `findings[]`, `graphs_available_for`, `analyzed_symbols`). This is a local structural check, not another sub-agent call, so it costs nothing to repeat on every hit — a hit is only as trustworthy as the write-time judgment that produced it (4C.2.1's shape check + all of 4C.4's guards), and this is the minimum re-verification that a corrupted or truncated cache entry never gets silently trusted.
-  - **Shape valid:** load `data` directly into this module's results, set `module_progress[module_name].status = complete (cached)`, print `[4C] {module}: cache hit (unchanged since {cached_at}) — analysis skipped`, and remove it from the dispatch list below.
+- `{"status": "hit", "data_file": ..., ...}` — **before accepting**, parse the file at `data_file` as JSON and validate it has the same required shape 4C.2.1 point 4 checks (`module`, `findings[]`, `graphs_available_for`, `analyzed_symbols`). This is a local structural check, not another sub-agent call, so it costs nothing to repeat on every hit — a hit is only as trustworthy as the write-time judgment that produced it (4C.2.1's shape check + all of 4C.4's guards), and this is the minimum re-verification that a corrupted or truncated cache entry never gets silently trusted.
+  - **Shape valid:** load the parsed file directly into this module's results, set `module_progress[module_name].status = complete (cached)`, print `[4C] {module}: cache hit (unchanged since {cached_at}) — analysis skipped`, and remove it from the dispatch list below.
   - **Shape invalid (malformed JSON, or a required field missing):** treat as a miss — print `[4C] {module}: cache entry failed shape validation, re-running fresh` and route this module into the 4C.2.1 batch dispatch below exactly like an ordinary miss (do not special-case it further; 4C.2.2 will overwrite the corrupt entry with a freshly validated one once the module passes).
 - `{"status": "miss", ...}` — keep `hash` for 4C.2.2; this module goes into the batch dispatch.
 
@@ -749,13 +961,39 @@ Render **§1 Phase A Report** from `@references/report-formats.md`.
 
 If `--save` flag: write report to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other), or the explicit path if one was provided. Write is a full-file overwrite — never concatenated with prior runs.
 
-If `--phase a` only: display this report and stop. Otherwise continue to Phase B.
+If `SKIP_DOCS`: display this report and stop. Otherwise continue to Phase B.
 
 ---
 
 ## PHASE B: Documentation Internal Consistency
 
-Phase B runs ONLY after Phase A completes. It verifies two things:
+**Boundary with audit D4 — presence vs. consistency.** Both read the same ~4.4 MB spec
+corpus, for different questions. They are not duplicates and neither subsumes the other:
+
+| Question | Owner | Examples |
+|---|---|---|
+| Does the documentation **exist and cover** what it should? | **audit D4** | README has the required sections; CHANGELOG follows Keep a Changelog; public methods have parameter docs; which symbols have a `## Contract:` block at all |
+| Does the documentation **agree** — with itself, and with verified code? | **sync Phase B** | PRD and feature spec contradict each other about a capability; SRS calls it `foo()` and tech design calls it `bar()`; a README example uses a signature `verified_api` says does not exist |
+
+Rule of thumb: a **missing** doc or an **uncovered** symbol is D4's. A doc that exists
+and says the **wrong or conflicting** thing is Phase B's. A finding that fits both
+belongs to the one whose fix it implies — "write the missing section" is D4, "correct
+the section that disagrees" is Phase B.
+
+Neither may skip its half on the assumption the other covered it. They run in different
+skills and are routinely invoked separately.
+
+> **Known inefficiency, deliberately not fixed here.** Both build their own index over
+> the same corpus (`shared/subagent-policy.md` P10), so a run of both indexes it twice.
+> The natural fix is a shared doc index alongside the extraction cache (P9) — keyed by
+> content hash, `symbol -> [(document, line)]`. Worth doing when either side's indexing
+> cost is measured; not worth guessing at before that.
+
+Phase B runs ONLY after Phase A completes, and **cannot be run on its own** for `core` / `mcp` scope: half of it checks each repo's README and examples against `verified_api` (Step 4.4), which only a Phase A run in the same invocation produces. Comparing docs against other docs without that baseline is circular. There is no flag to request Phase B alone, and resuming it from a previous run's `verified_api` is not implemented.
+
+The `integrations` scope is the one exception, and it is not a counter-example: integration repos have no protocol spec, so Phase A is N/A for them (Step 1.2) and only check 1 below — doc-internal consistency, which needs no `verified_api` — applies.
+
+It verifies two things:
 1. The documentation repo's internal documents are consistent with each other (no contradictions)
 2. Implementation repos' README and examples are consistent with `verified_api` from Phase A
 
@@ -771,7 +1009,21 @@ Spawn sub-agents in parallel: **one per documentation repo** + **one per impleme
 
 **Sub-agent prompt:** Use the template from `@references/audit-impl-repo-prompt.md`, filling in `{impl_repo_path}` and injecting the `{verified_api}` for that repo from Step 4.4.
 
-**Main context retains:** Structured findings per repo.
+**Doc-audit coverage gate (MANDATORY — mirrors Step 2's extraction gate).** The doc-repo
+sub-agent returns a `DOC_AUDIT_COVERAGE` block. Read it; do not skip to the findings.
+
+| Signal | Action |
+|---|---|
+| Documents indexed < 100% | WARNING `[B-COV-{seq}] doc audit for {repo} indexed {N} of {M} spec-chain documents — contradictions involving the {M-N} unindexed documents cannot have been found`. Continue. |
+| `Symbols compared` < `Multi-document symbols` | WARNING `[B-COV-{seq}] doc audit compared {N} of {M} multi-document symbols — this repo's Phase B result is a lower bound`. Continue. |
+| `DOC_AUDIT_COVERAGE` block absent | WARNING `[B-COV-{seq}] doc audit for {repo} returned no coverage block — treat its "no contradictions" as unverified`. Do NOT silently accept. |
+
+A Phase B section reporting zero contradictions **must** carry its coverage numbers
+alongside. "No contradictions found" and "no contradictions found in the 40% we read"
+are different claims, and only one of them is worth acting on. Same reasoning as Step 2's
+extraction gate: the failure this catches is a confident clean result on a partial surface.
+
+**Main context retains:** Structured findings per repo, plus each repo's coverage block.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Deep cross-repo consistency audit for apcore ecosystem — ONLY when user explicitly invokes /apcore-skills:audit. Do NOT auto-trigger."
-argument-hint: "[--scope core|mcp|integrations|all] [--fix] [--no-deep-chain] [--strict] [--save report.md]"
+argument-hint: "[--scope core|mcp|integrations|all] [--fix] [--deep-chain on|off] [--strict] [--save report.md]"
 allowed-tools: [Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet]
 ---
 

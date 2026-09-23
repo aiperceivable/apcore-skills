@@ -57,6 +57,37 @@ half-built.**
 
 For each SDK repository:
 
+**Step E.0: Script the mechanical surface before reading anything by hand**
+
+For any repo above ~30 source files, **write a small parser script and run it**
+rather than opening files one by one. Use the language's own AST where available
+(Python `ast`, TypeScript `typescript` compiler API or a regex pass over
+`export` lines, Rust a regex pass over `pub` items plus `mod`/`pub use`
+resolution). Have it emit, for every public symbol: name, kind, signature,
+`source_file`, and the `checkpoint:` markers in each body.
+
+This is not a micro-optimization. Measured on two comparably sized SDKs in this
+ecosystem, extracting the same kind of surface:
+
+| Repo | Approach | Sub-agent tokens | Tool calls | Wall clock |
+|---|---|---|---|---|
+| `apcore-python` (91 files, 285 symbols) | wrote an AST script, ran it | **117 k** | 27 | 7 min |
+| `apcore-typescript` (100 files, 336 symbols) | read files individually | **495 k** | 118 | 28 min |
+
+Same job, **4.2× the tokens and 4× the wall clock** for the hand-read approach.
+Reading 100 files individually means 100 round trips whose full text lands in
+context; a script reads them in one process and returns only the extracted rows.
+
+**What the script cannot do.** Step E.4b's behavioral contract — which inputs are
+validated and with what rejection, which errors are raised, the *order* of side
+effects, and the `pure`/`idempotent`/`thread_safe` properties — requires reading
+method bodies with judgment, not pattern matching. So: script the mechanical
+surface (symbols, kinds, signatures, `source_file`, `FILE_MAP`, checkpoint
+markers), then read bodies **in batches** only for contract extraction, and only
+for the public methods the script found. Do not let the script guess a contract;
+a fabricated contract is worse than a missing one, because Step 4B compares it as
+if it were observed.
+
 **Step E.1: Read public exports (language-specific deep scan)**
 
 Each language requires a different extraction strategy. Surface-level scanning is NOT sufficient — follow module trees, re-exports, and implementation blocks.
@@ -401,11 +432,41 @@ CLASSES:
         properties: { async: false, thread_safe: true, pure: false, idempotent: null, reentrant: null }
 ```
 
+**`errors_raised` vs `errors_propagated` — record them separately.**
+
+An error a method throws *itself* and one thrown by a helper it calls are both
+observable to the caller, but they are not equally easy to extract, and leaving the
+boundary unstated makes the field mean different things in different languages.
+
+Measured consequence: a real audit produced **confirmed false positives**
+(`CancelToken.raise_if_cancelled`, `ExtensionManager.get`) purely because the Python
+pass did not resolve raises inside called helpers while the TypeScript and Rust passes
+did. The code agreed; the *extraction* disagreed, and the comparison reported a
+cross-language divergence that does not exist. Every `errors_raised` comparison is
+polluted until this is pinned down.
+
+| Field | What goes in it |
+|---|---|
+| `errors_raised` | Errors thrown by a `raise` / `throw` / `return Err(...)` **statement lexically inside this method's own body**. Nothing else. |
+| `errors_propagated` | Errors from **same-repo callees**, expanded to **depth 2** (this method → helper → helper). Each entry records its origin: `{error, via: "_validate_id"}`. Stop at depth 2, at a repo boundary, or at a third-party call — and set `propagation_truncated: true` when you stopped early. |
+
+Apply this identically in every language. Do not let a language's convenience
+(Python's `raise` being easy to grep, Rust's `?` operator being harder) decide which
+field an error lands in.
+
+**Consumers compare like with like.** sync Step 4B and audit D10 compare
+`errors_raised` against `errors_raised` and `errors_propagated` against
+`errors_propagated` — never across the two. A divergence where one repo's error sits
+in `errors_raised` and another's in `errors_propagated` is a **refactor difference,
+not a behavioral one** (the helper was inlined in one language); emit it as `info`,
+not `critical`. If `propagation_truncated` is set on either side, the comparison for
+that symbol is `inconclusive`, not a pass.
+
 **Rules:**
 1. **Mandatory for every public method** — unlike skeleton, contract extraction is not gated on any flag or spec declaration. Every sub-agent MUST return a `contract` object per method.
 2. **Conservative inference** — if a field cannot be statically determined, return `null`. Never invent.
 3. **Degraded-mode usefulness** — even when the spec has no `## Contract` block, the extracted contract records from multiple repos can be cross-compared to surface divergence (e.g., Python raises `DuplicateError` but TS silently returns — surfaced as cross-repo finding even with no spec authority).
-4. **Budget** — keep the total `contract` block under ~500 bytes per method to stay within sub-agent output limits.
+4. **Budget** — keep each `contract` block around ~500 bytes; trim prose, never coverage. This is a per-block style bound, **not** a cap on how many methods get one: every public method gets a contract, and the extraction is written to a file (sync Step 2.1a) precisely so that "hundreds of methods × 500 bytes" has somewhere to go. If you find yourself dropping methods, narrowing scope, or proposing that the repo be split across sub-agents to fit an output limit, you are solving the wrong problem — write to the file and keep extracting.
 
 **Step E.5: Extraction Verification**
 
@@ -413,7 +474,13 @@ After extraction, verify completeness before proceeding to comparison:
 
 1. **Module coverage** (Rust): Count `mod` declarations in `lib.rs` vs. modules actually scanned. If any `mod` was declared but not scanned → ERROR, re-scan.
 2. **Re-export coverage** (Rust/TS): Count `pub use` / `export * from` statements vs. resolved sources. Unresolved re-exports → ERROR.
-3. **File coverage**: Count source files in `src/` vs. files actually read. Report percentage. If < 80% → WARNING, investigate.
+3. **File coverage** — report two numbers, and gate on the second:
+   - *Raw*: source files in `src/` vs. files actually read. **INFORMATIONAL ONLY.** Do not gate on it. A healthy repo legitimately contains files that define no public symbol (internal helpers, tests fixtures, type-only shims, platform shims); reading them adds tokens and no surface. Measured on a real SDK: `apcore-typescript` reads 79/100 files (79%) while missing nothing — the other 21 export nothing public.
+   - *Symbol-defining*: files that define at least one public symbol vs. how many of those you read. **This must be 100%.** Below that → WARNING, and the extraction is genuinely incomplete.
+
+   The raw number cannot be a gate because it fails in the expensive direction: a flat 80% floor makes a normal repo permanently fail its own quality gate, which (per sync 2.2) means it is never cached and re-extracts on every single run forever — paying a full sub-agent, every time, to learn the same thing. A threshold whose failure mode is unbounded recurring cost must be one a correct repo can actually clear.
+
+   **Why the symbol-defining number cannot be self-certified.** "I read every file that defines a symbol" is circular if the symbol list came from an incomplete scan. It is validated by checks 1 and 2, which are independent of it: a module tree walked to completion and every re-export chain resolved together prove the exported surface was enumerated before any file was skipped. Report all three; a run with 100% on checks 1 and 2 and 100% symbol-defining coverage is complete no matter what the raw percentage says.
 4. **Symbol count sanity**: Compare extracted symbol count against typical density (2-10 public symbols per source file). Major deviation → WARNING.
 5. **Trait implementation coverage** (Rust): Count trait definitions vs. found `impl Trait for X` blocks. Missing implementations → flag.
 6. **`source_file` coverage**: Count top-level symbols carrying a non-null `source_file` vs. total top-level symbols. Anything below 100% → WARNING naming the symbols that lack one. A symbol whose defining file is unknown cannot be routed to a deep-chain sub-agent, so it silently drops out of Step 4C coverage — report it rather than letting it vanish.
@@ -423,7 +490,8 @@ Report verification results:
 Extraction Verification: apcore-rust
   Module tree: 15/15 modules scanned (100%) ✓
   Re-exports: 8/8 pub use chains resolved (100%) ✓
-  Files: 22/24 source files read (92%) — 2 files in examples/ skipped ✓
+  Files (raw, informational): 22/24 source files read (92%)
+  Files (symbol-defining): 22/22 read (100%) ✓  ← this is the gated one
   Symbols: 47 public items extracted (3.1 per file — reasonable) ✓
   Source files: 47/47 symbols mapped to a defining file (100%) ✓
   Trait impls: 5 traits defined, 12 impl blocks found ✓

@@ -81,7 +81,7 @@ Consistency Health (from latest reports):
 
 Commands:
 
-  /apcore-skills:sync [repos...] [--phase a|b|all] [--fix] [--scope core|mcp|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--save]
+  /apcore-skills:sync [repos...] [--skip-docs] [--fix] [--scope core|mcp|integrations|all] [--lang python,typescript,...] [--internal-check none|contract|skeleton|behavior] [--deep-chain on|off] [--modules mod1,mod2,...] [--save]
       Cross-language API + contract + documentation consistency check & fix
 
   /apcore-skills:sdk <language> [--type core|mcp] [--ref <existing-sdk>]
@@ -90,7 +90,7 @@ Commands:
   /apcore-skills:integration <framework> [--lang python|typescript|go] [--ref <existing-integration>]
       Bootstrap new framework integration
 
-  /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--no-deep-chain] [--save report.md]
+  /apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--deep-chain on|off] [--save report.md]
       Deep cross-repo consistency audit
 
   /apcore-skills:tester [<repos...>] [--spec <feature>] [--mode generate|run|full] [--category unit|integration|boundary|protocol|contract|conformance|all] [--save report.md]

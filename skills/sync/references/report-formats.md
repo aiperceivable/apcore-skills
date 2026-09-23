@@ -5,7 +5,7 @@ report step; it is **not** needed to execute Phases A and B.
 
 | Template | Rendered by | Emitted when |
 |---|---|---|
-| §1 Phase A Report | Step 5 | Always (then stop if `--phase a`) |
+| §1 Phase A Report | Step 5 | Always (then stop if `--skip-docs`) |
 | §2 Phase B Report | Step 8 | Phase B ran |
 | §3 Combined Report | Step 9 | Both phases ran — **after** the Step 9.0 noise-control pass |
 | §4 Review-Compatible Issue Report | Step 9.1 | Always appended after §3 |
@@ -64,7 +64,7 @@ Internal skeleton (--internal-check >= skeleton):
   Methods with reordered checkpoints: {N}
   Methods with no instrumentation: {N}
 
-Cross-language deep-chain (--deep-chain=on — DEFAULT):
+Cross-language deep-chain (only when --deep-chain on — NOT the default):
   Scope: {all modules | RESTRICTED by --modules to: {analyzed}; excluded: {excluded}}
   Modules analyzed: {N}
   Modules skipped (source files unresolved): {N}
@@ -202,13 +202,19 @@ Finding ID namespaces:
   A-{seq}     Phase A signature / type / naming findings (Step 4.1–4.3)
   A-S-{seq}   Phase A skeleton findings (Step 4A — only when --internal-check >= skeleton)
   A-C-{seq}   Phase A contract findings (Step 4B — default when --internal-check >= contract)
-  A-D-{seq}   Phase A deep-chain findings (Step 4C — default when --deep-chain=on)
+  A-D-{seq}   Phase A deep-chain findings (Step 4C — only when --deep-chain on; OFF by
+              default, in which case 4C.0's NOT RUN block renders instead)
   A-DS-{seq}  Phase A deep-chain SCOPE notices (Step 4C.1 / 4C.1b — modules skipped
               for unresolved source files, partial-language coverage, --modules
               narrowing). Like A-EXT-, these describe the audit's own coverage, not a
               defect in the audited repo, and they are exempt from §5's mandatory
               deep-chain finding shape because they cite no symbol or evidence.
   B-{seq}     Phase B documentation findings (Steps 6–8)
+  B-COV-{seq} Phase B doc-audit coverage warnings (Step 6 gate — how much of the spec
+              chain was actually indexed and compared). Like A-EXT- and A-DS-, these
+              describe the audit's own reach, not a defect in the audited docs. A Phase B
+              section reporting zero contradictions alongside a B-COV- warning is a lower
+              bound, and must be read as one.
   All IDs are stable within a single run; regenerated per invocation.
 
 ═══ PHASE A: Spec ↔ Implementation ═══
@@ -234,18 +240,21 @@ Internal skeleton (--internal-check >= skeleton):
   Methods checked: {N} | Pass: {N} | Missing checkpoint: {N} | Reordered: {N} | No instrumentation: {N}
   (omitted entirely if --internal-check=none or --internal-check=contract, or if no spec skeletons defined)
 
-Cross-language deep-chain (--deep-chain=on — DEFAULT):
+Cross-language deep-chain (only when --deep-chain on — NOT the default):
   Scope: {all modules | RESTRICTED by --modules to: {analyzed}; excluded: {excluded}}
   Modules: {N} analyzed | {N} complete | {N} failed | {N} inconclusive | {N} skipped (files unresolved)
   Findings: critical {N} | warning {N} | info {N} | inconclusive {N}
   By type: semantic-divergence {N} | missing-validation {N} | missing-registration {N} |
            defensive-gap {N} | error-path-divergence {N} | contract-gap {N}
-  (omitted entirely if --deep-chain=off or --internal-check=none or <2 implementations)
+  When deep-chain did NOT run — which is the default — this section is REPLACED by the
+  mandatory NOT RUN disclosure block from SKILL.md 4C.0. It is never simply omitted:
+  an absent section and a clean section must not look alike.
 
 ═══ PHASE B: Documentation Consistency ═══
 
 Doc repo internal:
   {doc-repo}: {N} contradictions, {N} gaps
+  Coverage: {N}/{M} spec-chain documents indexed | {N}/{M} multi-document symbols compared
 
 Implementation repo docs:
   Repo                  | README | API Refs | Examples | Tests  | Cross-Doc

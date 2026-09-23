@@ -22,6 +22,7 @@ Each script has an authoritative markdown spec it mirrors. The markdown is the
 | `extract-markers.sh` | `shared/api-extraction-protocol.md` §E.4a | sync Step 4A / Step 2 marker grep |
 | `audit-mechanical.py` | `audit/references/dimension-prompts.md` D2, D3, D6, D7, D8 | audit Step 2a — replaces **five** per-dimension sub-agents with one call |
 | `extract_cache.py` | `shared/ecosystem.md` §0.6b | sync Step 2.0/2.2 (API extraction) and Step 4C.2.0/4C.2.2 (deep-chain) — skips a sub-agent entirely on an unchanged-input cache hit |
+| `selfcheck.py` | — (this file) | `test.sh` and CI — holds the cross-file invariants that no single document states. Run after editing any SKILL.md, reference prompt, or shared doc. |
 
 **A skill should:** try the script, parse its JSON/stdout; if Python/bash is
 unavailable, the script errors, or output looks wrong, fall back to executing the
@@ -110,3 +111,42 @@ in the same commit. Per `scoring.md` §Change Control, a formula/threshold chang
 is a breaking change and must bump the apcore-skills minor version.
 
 Stdlib/POSIX only — no `pip install`, no third-party deps.
+
+---
+
+## `selfcheck.py` — why it exists
+
+`audit-mechanical.py` checks the user's SDK repos. `selfcheck.py` checks **this plugin**,
+for one specific class of defect:
+
+> a normative document changed, and a consumer that depends on it did not.
+
+That failure occurred **five times** during one refactor of this plugin, and every time
+it was caught by a person reading files, never by a tool. The invariants it breaks are
+real but live *between* files, so no single document can hold them:
+
+| Check | The failure it would have caught |
+|---|---|
+| `include-resolves` | an `@../shared/x.md` pointing at nothing |
+| `flag-spelling` | `--deep-chain on\|off` in one skill, `--no-deep-chain` in another |
+| `flag-default-drift` | flipping a default in the flag table while three prose paragraphs still asserted the old one |
+| `namespace-registry` | emitting `[A-DS-{seq}]` findings that `report-formats.md` had no row for, so the report could not render them |
+| `field-consumers` | adding `errors_propagated` to the extraction output format while all four downstream consumers still read only `errors_raised` — the fix shipped **inert** |
+| `tag-covers` | editing `extract-api-prompt.md` after bumping the cache tag, so `v2` entries missing a field would be served into a comparison that reads it |
+
+### The manifest
+
+`selfcheck.json` records the dependencies that are otherwise implicit: which fields must
+have consumers, which files each cache tag covers (by content hash), and which
+conventional negative flags are allowlisted. Each entry carries a `_why`.
+
+**When a check fires, the manifest is usually not what is wrong.** Wire the field up, or
+bump the tag — then record the new hash. Editing the manifest to silence a finding is
+the one move that defeats the point.
+
+### Adding a check
+
+Add it when a cross-file invariant breaks **in reality**, not in theory. Every check here
+is named after an incident. A checker full of speculative rules gets ignored, and an
+ignored checker is worse than none — it converts a real signal into noise the next reader
+learns to scroll past.

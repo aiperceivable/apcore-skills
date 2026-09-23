@@ -133,7 +133,7 @@ health, and available commands.
 Read `skills/sync/SKILL.md`.
 
 Use for cross-language API, contract, deep-chain, and documentation consistency
-checking and optional fixing. Honors flags such as `--phase`, `--fix`, `--scope`,
+checking and optional fixing. Honors flags such as `--skip-docs`, `--fix`, `--scope`,
 `--lang`, `--internal-check`, `--deep-chain`, `--modules`, `--strict`, and `--save`.
 
 ### SDK

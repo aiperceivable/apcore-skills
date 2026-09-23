@@ -208,6 +208,29 @@ FINDINGS:
 
 ## D4 — Documentation Audit
 
+**Boundary with sync Phase B — presence vs. consistency.** Both read the same ~4.4 MB spec
+corpus, for different questions. They are not duplicates and neither subsumes the other:
+
+| Question | Owner | Examples |
+|---|---|---|
+| Does the documentation **exist and cover** what it should? | **audit D4** | README has the required sections; CHANGELOG follows Keep a Changelog; public methods have parameter docs; which symbols have a `## Contract:` block at all |
+| Does the documentation **agree** — with itself, and with verified code? | **sync Phase B** | PRD and feature spec contradict each other about a capability; SRS calls it `foo()` and tech design calls it `bar()`; a README example uses a signature `verified_api` says does not exist |
+
+Rule of thumb: a **missing** doc or an **uncovered** symbol is D4's. A doc that exists
+and says the **wrong or conflicting** thing is Phase B's. A finding that fits both
+belongs to the one whose fix it implies — "write the missing section" is D4, "correct
+the section that disagrees" is Phase B.
+
+Neither may skip its half on the assumption the other covered it. They run in different
+skills and are routinely invoked separately.
+
+> **Known inefficiency, deliberately not fixed here.** Both build their own index over
+> the same corpus (`shared/subagent-policy.md` P10), so a run of both indexes it twice.
+> The natural fix is a shared doc index alongside the extraction cache (P9) — keyed by
+> content hash, `symbol -> [(document, line)]`. Worth doing when either side's indexing
+> cost is measured; not worth guessing at before that.
+
+
 ```
 Audit documentation quality across apcore ecosystem.
 
@@ -222,7 +245,12 @@ For each repo check:
 6. Examples directory exists (for integrations)
 
 For documentation repos (apcore/, apcore-mcp/) additionally check:
-7. **Contract coverage in feature specs**. For each `docs/features/*.md` file, identify every public class/function/method declared (by header pattern `## Class:`, `## Function:`, or API reference table). For each declared public symbol, check that a `## Contract:` block exists per `shared/contract-spec.md`. A Contract block MUST contain: `### Inputs`, `### Errors`, `### Returns`, `### Properties`. If a public symbol has no Contract block, report as WARNING with detail "feature spec {file} declares {Symbol} but has no ## Contract: block — intent parity cannot be verified". If a Contract block exists but is missing required fields, report as INFO.
+7. **Contract coverage in feature specs**. **Index first — do not read the corpus.**
+   `docs/features/*.md` is 870 KB across 23 files on this ecosystem; a `grep -n` for the
+   header patterns gives you every declaration site in a few KB, and you slice a block by
+   line range only when you evaluate it. Reading all 23 files whole is a self-inflicted
+   context blowout (the same one that made D10 unrunnable before it was fixed).
+   From the index, identify every public class/function/method declared (by header pattern `## Class:`, `## Function:`, or API reference table). For each declared public symbol, check that a `## Contract:` block exists per `shared/contract-spec.md`. A Contract block MUST contain: `### Inputs`, `### Errors`, `### Returns`, `### Properties`. If a public symbol has no Contract block, report as WARNING with detail "feature spec {file} declares {Symbol} but has no ## Contract: block — intent parity cannot be verified". If a Contract block exists but is missing required fields, report as INFO.
 8. **Algorithm section coverage** (optional — INFO only). Feature specs MAY have `## Algorithm:` blocks for methods that have complex internal sequences. Not required, but missing Algorithm prevents skeleton-tier sync. Report as INFO only.
 
 Error handling: If a repo path does not exist, skip it and report as info finding.
@@ -413,7 +441,20 @@ For each repo, perform ALL of the following checks:
 
 1. DEAD EXPORTS — public symbols (classes, functions, constants, types) declared in the
    main export file (__init__.py / index.ts / lib.rs / mod.rs) that have zero callers
-   anywhere in the ecosystem. Cross-check against ALL repos in scope when possible — a
+   anywhere in the ecosystem.
+
+   **Do not re-enumerate the export surface.** If
+   `{ecosystem_root}/.apcore-skills-cache/sync/api/{repo}.extraction.md` exists, its
+   `FILE_MAP:` section already lists every public symbol with its defining file —
+   measured 285 / 336 / 398 for the three core SDKs, 1,019 in total, each traced through
+   its re-export chain to the definition site. Read that section (it is the last block of
+   the file) and use it as your candidate list. Enumerating the surface yourself means
+   re-walking the module tree a second time for a result already on disk, and your
+   independent list is *less* reliable — it will miss glob and renamed re-exports that the
+   extraction pass resolved. Fall back to scanning only if the file is absent, and say so.
+
+   Searching for *callers* is still your own work — the cache records where a symbol is
+   defined, never who uses it. Cross-check against ALL repos in scope when possible — a
    symbol exported by core-sdk but never imported by any integration or downstream repo
    is a strong dead-export signal.
    - severity: warning (zero internal + zero external callers)
@@ -547,15 +588,58 @@ Doc repo (spec authority): {doc_repo_path} — may be empty for integration-only
 This dimension catches the bug class "public signatures match but logic/intent differs".
 It does NOT check helper-name parity (that is explicitly out of scope — see sync Anti-Rationalization Table).
 It DOES check that every SDK agrees on: input validation rules, errors raised and their codes,
+**comparing `errors_raised` only against `errors_raised` and `errors_propagated` only against
+`errors_propagated`** (`api-extraction-protocol.md` E.4b) — an error that one SDK throws inline
+and another throws from a helper is a refactor difference, `info`, not a divergence. A symbol with
+`propagation_truncated: true` on either side is `inconclusive`, not a pass. Ignoring this split is
+what produced the confirmed false positives `CancelToken.raise_if_cancelled` and
+`ExtensionManager.get` in a previous run,
 side-effect order, return shape, and behavioral properties (async, thread-safe, pure, idempotent, reentrant).
 
 Read `shared/contract-spec.md` for the authoritative Contract block format.
 Read `shared/api-extraction-protocol.md` Step E.4b for the per-method contract extraction protocol.
 
+=== Step 0: REUSE, do not re-derive ===
+
+**Before reading any source, check for sync's extraction cache:**
+
+    {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+
+Those files already carry a `contract:` block per public method, extracted under the
+same protocol you are about to apply (`api-extraction-protocol.md` E.4b) — measured on
+this ecosystem: 563 / 575 / 430 contract blocks for python / rust / typescript, 1,568
+in total. **That is exactly the input this dimension compares.** Re-deriving it from
+source costs several hundred thousand tokens to reproduce a result already on disk.
+
+For each repo in {repo_paths}:
+- **File present** → read the per-symbol `contract:` blocks out of it, in slices. Do
+  not read the repo's source for contract data. Note the file's `EXTRACTION_VERIFICATION`
+  coverage numbers; if the extraction was partial, say so in your findings rather than
+  silently comparing a subset.
+- **File absent** → fall back to extracting from source per E.4b, and say so in your
+  output (`CONTRACT_SOURCE: derived-from-source`), because a from-source pass and a
+  cached pass are not guaranteed identical in depth.
+
+Record which path you took:
+
+    CONTRACT_SOURCE: sync-cache | derived-from-source | mixed
+    CACHE_COVERAGE: {repo}: {N} contract blocks, extraction {complete|partial}
+
 === Step 1: Load spec Contracts (if doc repo provided) ===
 
-For each `docs/features/*.md` in {doc_repo_path}:
-1. Find every `## Contract: ClassName.method_name` block
+**Index first, never load the corpus.** Measured on `apcore/`: `docs/features/*.md` is
+870 KB across 23 files, of which only the `## Contract:` blocks (250 KB, 140 blocks)
+are normative here — the other 71% is Overview / Requirements / Usage / Testing prose
+this dimension never compares against. Reading all 23 files whole is a self-inflicted
+context blowout inside your own sub-agent.
+
+    grep -n '^## Contract: ' {doc_repo_path}/docs/features/*.md
+
+gives every (file, line, symbol) triple in a few KB. Slice each block by line range
+(it ends at the next `^## ` heading) **only when you compare that symbol**, and drop it
+afterwards. Then:
+
+1. For each indexed `## Contract: ClassName.method_name` block
 2. Parse `### Inputs`, `### Preconditions`, `### Side Effects`, `### Postconditions`, `### Errors`, `### Returns`, `### Properties`
 3. Store as `spec_contracts[scope][symbol]` — canonical two-level keying per `shared/contract-spec.md` §Canonical Storage Shape. `scope` is the doc-repo group (derived from `{doc_repo_path}` — e.g., `apcore/` → `core`, `apcore-mcp/` → `mcp`). `symbol` is `ClassName.method_name` in canonical snake_case.
 
@@ -699,12 +783,39 @@ CONTRACT_MATRIX:
     - row: property.{async|thread_safe|pure|idempotent|reentrant}
       ...
 
-Target output size: keep CONTRACT_MATRIX to at most **15 symbols** (the ones with most severe divergences first — critical before warning). Additionally cap total byte count at **20 kB**: stop emitting CONTRACT_MATRIX rows once the cumulative bytes reach 20 kB and append a tail:
+**Output: write the full matrix to a file, return a receipt** (`shared/subagent-policy.md` P7).
 
-    TRUNCATED_SYMBOLS: [symbol1, symbol2, ...]   # names only, no per-row expansion
-    TRUNCATION_REASON: "exceeded 15-symbol limit | exceeded 20 kB byte budget | both"
+Write every diverging symbol's CONTRACT_MATRIX rows — all of them, no cap — to:
 
-Summarize fully-passing symbols as a count "N symbols fully match, not listed". A follow-up `/apcore-skills:audit` run filtered to specific symbols can expand the truncated entries if needed.
+    {ecosystem_root}/.apcore-skills-cache/audit/D10-contract-matrix.md
+
+Return inline only:
+
+    CONTRACT_MATRIX_FILE: {path}
+    DIVERGING_SYMBOLS: {N}        # total, across all severities
+    BY_SEVERITY: critical {N} | warning {N} | info {N}
+    MATCHING_SYMBOLS: {N}         # fully match, not listed
+    TOP_DIVERGENCES:              # the 15 most severe, expanded inline for the report
+      ... (critical before warning; full per-row expansion)
+
+**Do not cap the file.** The previous rule capped CONTRACT_MATRIX at 15 symbols and
+20 kB with a `TRUNCATED_SYMBOLS` tail. Two things were wrong with it:
+
+1. **The cap is a sample, not a result.** Measured on this ecosystem the SDKs carry
+   285 / 336 / 398 public symbols; 15 is under 5%. A report reading "contract
+   divergences: 15" invites the conclusion that there were 15.
+2. **The documented recovery did not exist.** It told the reader to re-run
+   `/apcore-skills:audit` "filtered to specific symbols" — audit has no such flag
+   (verified: zero occurrences of `--symbol`/`--symbols` in this skill). Truncated
+   symbols were unrecoverable.
+
+Writing to a file removes the reason for a cap: the 15-symbol inline list becomes a
+*preview* of a complete artefact rather than a lossy substitute for one, and the
+counts above tell the reader the true size. The report cites the file path so the
+rest is one `sed` away.
+
+Fully-passing symbols are still summarised as a count — that is compression of
+non-signal, not truncation of signal.
 
 === Step 4 (integration-specific): Consumer Contract Check ===
 
