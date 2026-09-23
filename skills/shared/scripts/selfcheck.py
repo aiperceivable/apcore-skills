@@ -21,6 +21,9 @@ actually happened, and was caught by a human reading files rather than by a tool
   C6 tag-covers          -- a cached prompt template edited without bumping its
                             cache-version tag, so stale entries are served into a
                             schema that changed under them
+  C7 host-constructs     -- a Claude-Code-specific construct spreading to a file the
+                            portability inventory does not cover (an unexpanded
+                            `@`-include drops its shared rules silently)
 
 Usage:
     selfcheck.py --root <plugin-root>     # exit 0 = clean, 1 = findings
@@ -246,6 +249,44 @@ def check_tag_covers(root: Path, spec: dict):
     return out
 
 
+# ---------------------------------------------------------------- C7
+
+
+def check_host_constructs(root: Path, spec: dict):
+    """Host-specific constructs may exist, but the inventory must stay declared.
+
+    None of these fails loudly on a host that lacks it -- an unexpanded `@`-include
+    just drops the shared rules it carried. PORTABILITY.md documents each one and its
+    fallback; this check fails when a construct shows up in a file that inventory does
+    not list, so the surface cannot grow without someone deciding it should.
+    """
+    out = []
+    inv = spec.get("host_constructs")
+    if not inv:
+        return out
+    for name, entry in sorted(inv.items()):
+        pattern = re.compile(entry["pattern"])
+        declared = set(entry["files"])
+        found = set()
+        for f in _skill_files(root):
+            if pattern.search(_read(f)):
+                found.add(str(f.relative_to(root)))
+        for extra in sorted(found - declared):
+            out.append(_finding(
+                "host-constructs", "warning", extra,
+                f"uses host-specific construct `{name}`, which PORTABILITY.md's "
+                f"inventory does not list for this file",
+                f"add it to selfcheck.json host_constructs[{name}].files after "
+                f"confirming PORTABILITY.md still describes the right fallback, or "
+                f"use a host-neutral form"))
+        for gone in sorted(declared - found):
+            out.append(_finding(
+                "host-constructs", "warning", gone,
+                f"declared as using `{name}` but no longer does",
+                "drop it from selfcheck.json -- a stale inventory understates portability"))
+    return out
+
+
 # ---------------------------------------------------------------- driver
 
 
@@ -259,6 +300,7 @@ def run(root: Path):
     findings += check_namespace_registry(root)
     findings += check_field_consumers(root, spec)
     findings += check_tag_covers(root, spec)
+    findings += check_host_constructs(root, spec)
     return findings
 
 

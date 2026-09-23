@@ -28,6 +28,11 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 @../shared/subagent-policy.md
 
+> **If you cannot see `<!-- SUBAGENT-POLICY-LOADED -->` above, this include did not expand** — some
+> hosts do not support `@`-includes. Read `skills/shared/subagent-policy.md` directly before continuing; it is
+> normative, not background reading. Proceeding without it silently drops the rules it
+> carries.
+
 **sdk-specific bindings:**
 
 - **P2 ceiling: 4.** Flags that reduce it: n/a

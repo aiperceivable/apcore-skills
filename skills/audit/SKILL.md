@@ -28,6 +28,11 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 
 @../shared/subagent-policy.md
 
+> **If you cannot see `<!-- SUBAGENT-POLICY-LOADED -->` above, this include did not expand** — some
+> hosts do not support `@`-includes. Read `skills/shared/subagent-policy.md` directly before continuing; it is
+> normative, not background reading. Proceeding without it silently drops the rules it
+> carries.
+
 **audit-specific bindings:**
 
 - **P2 ceiling: 12.** `--deep-chain` is **off by default**, so D11 costs nothing unless you opt in. Flags that reduce the rest: `--scope`
@@ -56,7 +61,6 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 | `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all` — the shared scope vocabulary from `shared/ecosystem.md` §0.3, identical across every skill. **If omitted and no positional repos, defaults to the current working directory's repo only.** |
 | `--fix` | off | Auto-fix issues where safe |
 | `--deep-chain` | **`off`** | Cross-language deep-chain analysis (D11). Set `--deep-chain on` to enable. **Off by default**: D11 delegates to `sync` Step 4C, which spawns one sub-agent per logical module — 22 on `apcore/`, an estimated ~4.4 M tokens cold, an order of magnitude more than every other dimension combined. Enable it deliberately, scoped: `--deep-chain on` plus sync's `--modules`. What you lose by leaving it off is chain-level divergence only — **D10 still compares declared contract shape on every run**, and on this ecosystem D10 alone produced 331 divergences including 10 criticals. Same spelling and default as `apcore-skills:sync --deep-chain`, deliberately: D11 *is* sync's Step 4C. |
-| `--no-deep-chain` | — | **Deprecated alias.** Now a no-op, since `off` is the default; kept so existing commands do not error. Use `--deep-chain on` to opt in. |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default the audit suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), D2 style-only nits (clippy lints whose suggestion is just `allow(...)` or rename-for-idiom), and findings tagged `[verify-spec-first]` (where the audit cannot independently determine which spec interpretation is authoritative). Pass `--strict` before a release audit when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker` findings, spec violations, dead code (D9), and API surface gaps (D1) always surface regardless of this flag. |
 | `--save` | off | Save report to file |
 
@@ -127,9 +131,9 @@ Step 0 (ecosystem) → Step 1 (parse args) → Step 2 (parallel audits) → Step
 
 ### Step 1: Parse Arguments and Plan Audit
 
-Parse `$ARGUMENTS` for flags. Recognized flags: `--scope`, `--fix`, `--deep-chain`, `--no-deep-chain` (deprecated alias), `--strict`, `--save`.
+Parse `$ARGUMENTS` for flags. Recognized flags: `--scope`, `--fix`, `--deep-chain`, `--strict`, `--save`.
 
-**`DEEP_CHAIN`** — resolve to `on`/`off` before anything else reads it: `--deep-chain off` → off; bare `--no-deep-chain` → off; neither present → `on`. If both appear, `--deep-chain` wins and a one-line note is printed. Every check below tests `DEEP_CHAIN == off`, never the raw flag text, so the alias cannot drift out of sync with the canonical spelling. Unknown flags must be reported back to the user as an error before any sub-agent is spawned.
+**`DEEP_CHAIN`** — `on` if `--deep-chain on` appears, else `off` (the default). Every check below tests `DEEP_CHAIN`, never raw flag text.
 
 **Set `STRICT_MODE`:** `true` if `--strict` appears anywhere in `$ARGUMENTS`, else `false`. Pass this value to the Step 2.5.5 suppression pass and surface it in the Step 3 report header.
 
@@ -168,7 +172,7 @@ Both modes can run in the same audit invocation — a `--scope all` run exercise
 **D11 (Deep-Chain Parity) trigger rule.** Runs whenever ≥2 same-type impl repos are in scope AND D10's Parity mode is active (they share the "need peers to compare against" precondition). Skipped with INFO when:
 - Only 1 impl repo in scope (no peer)
 - Scope is `integrations` only (single-language chain analysis is code-forge:review's job)
-- `DEEP_CHAIN == off` (the default) — skip D11 **and emit the NOT RUN disclosure** required by `sync` SKILL.md 4C.0, rendered in the D11 slot of the audit report. An absent D11 section and a clean D11 section must not look alike. (escape hatch for fast audits — set by `--deep-chain off` or the deprecated `--no-deep-chain`)
+- `DEEP_CHAIN == off` (the default) — skip D11 **and emit the NOT RUN disclosure** required by `sync` SKILL.md 4C.0, rendered in the D11 slot of the audit report. An absent D11 section and a clean D11 section must not look alike. (escape hatch for fast audits)
 
 Display:
 ```

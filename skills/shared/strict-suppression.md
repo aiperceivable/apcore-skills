@@ -1,5 +1,8 @@
 # Strict-Mode Suppression (shared rules — audit & sync)
 
+<!-- STRICT-SUPPRESSION-LOADED -->
+
+
 This document defines the **lean vs strict** finding-suppression policy shared by `apcore-skills:audit` and `apcore-skills:sync`. Both skills consume this rule set from their noise-control pipeline (audit Step 2.5.6, sync Step 9.0.3) so that the lean/strict semantics never drift between the two commands.
 
 ## Purpose

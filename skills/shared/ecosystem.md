@@ -1,5 +1,8 @@
 ### Step 0: Ecosystem Discovery and Configuration
 
+<!-- ECOSYSTEM-LOADED -->
+
+
 **Important:** Detect the ecosystem layout before any operation.
 
 > **Fast path (preferred).** Run the bundled discovery script instead of reading

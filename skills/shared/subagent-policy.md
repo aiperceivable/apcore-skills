@@ -1,5 +1,8 @@
 ### Sub-agent Dispatch Policy (shared — READ BEFORE SPAWNING ANYTHING)
 
+<!-- SUBAGENT-POLICY-LOADED -->
+
+
 Normative for every skill in this plugin that spawns sub-agents: `sync`, `audit`,
 `tester`, `release`, `integration`, `sdk`. These are hard limits, not guidance.
 

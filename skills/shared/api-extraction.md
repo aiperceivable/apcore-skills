@@ -1,5 +1,8 @@
 ### API Extraction Protocol
 
+<!-- API-EXTRACTION-LOADED -->
+
+
 Standard method for extracting and comparing public APIs across language implementations.
 
 > **Extraction protocol lives in `shared/api-extraction-protocol.md`.**

@@ -57,6 +57,32 @@ Once installed, the following commands are available in Codex:
 - `/apcore-skills:tester ...` - Spec-driven test generation and behavioral verification
 - `/apcore-skills:release <version> [--scope core|mcp|integrations|all]` - Coordinated release
 
+## Before you rely on it — read `PORTABILITY.md`
+
+Symlinking the tree installs the *files*; it does not make four Claude-Code-specific
+constructs work. None of them fails loudly, so the failure mode is a run that looks
+normal and quietly skipped something:
+
+| Construct | Fails silently? | What happens here if unsupported |
+|---|---|---|
+| `@../shared/*.md` includes | **yes** | The shared document never loads. For `subagent-policy.md` that means **no sub-agent ceiling, no bounded concurrency, and no abort-on-429** — the exact state that once exhausted a multi-hour quota. |
+| `$CLAUDE_PLUGIN_ROOT` | no | `shared/scripts/*` cannot be located. Every consumer has a documented non-script fallback, so nothing blocks — it just gets slower and less precise. |
+| `Agent(subagent_type=...)` | no | Sub-agent dispatch must be mapped to the host's equivalent. The *policy* (P1–P10) is host-independent prose and still applies. |
+| `AskUserQuestion` | no | Interactive scope checkpoints. Substitute prompt-and-halt; never let the host guess the answer. |
+
+The per-construct **file list** is deliberately not repeated here — it lives in
+`skills/shared/scripts/selfcheck.json`, where `selfcheck.py` holds it against the source.
+A count copied into prose is a number nothing checks, and this plugin's recurring defect
+is precisely a fact stated in one place and depended on in another.
+
+Mitigation already in the source: each shared document opens with a marker comment, and
+each include site tells the agent to read the file directly if the marker is not visible.
+An agent that follows the text recovers on its own — but verify it does, once, rather
+than assuming.
+
+`PORTABILITY.md` has the per-construct detail and the fallbacks.
+`skills/shared/scripts/selfcheck.py` fails if the inventory grows without being declared.
+
 ## Notes
 
 This repository is installed as a Codex skill tree via `~/.agents/skills`. It is

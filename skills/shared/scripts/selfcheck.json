@@ -57,5 +57,64 @@
   "conventional_negative_flags": [
     "--no-cache"
   ],
-  "_conventional_negative_flags_why": "Bare --no-X is normally a smell (it cannot gain values later), but --no-cache is a cross-tool convention (npm, pip, docker, cargo) and renaming it to --cache on|off would be the surprising choice. Allowlist it rather than teaching readers to ignore this check. Add to this list only for genuinely established conventions."
+  "_conventional_negative_flags_why": "Bare --no-X is normally a smell (it cannot gain values later), but --no-cache is a cross-tool convention (npm, pip, docker, cargo) and renaming it to --cache on|off would be the surprising choice. Allowlist it rather than teaching readers to ignore this check. Add to this list only for genuinely established conventions.",
+  "host_constructs": {
+    "@-include": {
+      "pattern": "@(?:\\.\\./)+[A-Za-z0-9_/.-]+\\.md",
+      "files": [
+        "skills/audit/SKILL.md",
+        "skills/integration/SKILL.md",
+        "skills/release/SKILL.md",
+        "skills/sdk/SKILL.md",
+        "skills/sync/SKILL.md",
+        "skills/tester/SKILL.md",
+        "commands/audit.md",
+        "commands/integration.md",
+        "commands/release.md",
+        "commands/sdk.md",
+        "commands/sync.md",
+        "commands/tester.md"
+      ]
+    },
+    "$CLAUDE_PLUGIN_ROOT": {
+      "pattern": "CLAUDE_PLUGIN_ROOT",
+      "files": [
+        "skills/audit/SKILL.md",
+        "skills/shared/api-extraction-protocol.md",
+        "skills/shared/ecosystem.md",
+        "skills/shared/scoring.md",
+        "SKILL.md"
+      ]
+    },
+    "Agent(subagent_type=": {
+      "pattern": "Agent\\(subagent_type",
+      "files": [
+        "skills/audit/SKILL.md",
+        "skills/integration/SKILL.md",
+        "skills/release/SKILL.md",
+        "skills/sdk/SKILL.md",
+        "skills/sync/SKILL.md"
+      ]
+    },
+    "AskUserQuestion": {
+      "pattern": "AskUserQuestion",
+      "files": [
+        "skills/audit/SKILL.md",
+        "skills/integration/SKILL.md",
+        "skills/release/SKILL.md",
+        "skills/sdk/SKILL.md",
+        "skills/sync/SKILL.md",
+        "skills/tester/SKILL.md",
+        "skills/shared/ecosystem.md",
+        "commands/apcore-skills.md",
+        "commands/audit.md",
+        "commands/integration.md",
+        "commands/release.md",
+        "commands/sdk.md",
+        "commands/sync.md",
+        "commands/tester.md"
+      ]
+    }
+  },
+  "_host_constructs_why": "Inventory of host-specific constructs, documented in PORTABILITY.md. Non-zero is fine; growing silently is not. When this check fires, decide whether the construct belongs there at all before adding the file to the list."
 }

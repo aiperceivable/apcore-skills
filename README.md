@@ -4,6 +4,34 @@
 
 Apcore ecosystem management skill for Claude Code. Handles cross-language SDK synchronization, framework integration scaffolding, multi-repo audits, spec-driven test generation, coordinated releases, and documentation alignment.
 
+## Portability
+
+Authored for Claude Code; installable for Codex as a skill tree (`.codex/INSTALL.md`).
+Four host-specific constructs exist and are inventoried in **`PORTABILITY.md`** — none
+of them fails loudly, so each carries a documented fallback, and `selfcheck.py` fails if
+the inventory grows undeclared. Everything under `skills/shared/scripts/`, the extraction
+cache, and every report format is host-neutral.
+
+## Design policy — single operator, no compatibility layers
+
+This plugin has **one user**. Flags, output formats, cache schemas and report layouts are
+changed **in place**: rename it, delete the old spelling, done. Do not add a deprecated
+alias, a transitional no-op, or a "kept so existing commands keep working" shim — there
+are no existing commands but the operator's own, and they are edited in the same sitting.
+
+Every compat layer left behind is a second spelling that must be kept consistent forever,
+and this plugin's dominant defect class is exactly that: **a normative document changed
+and a consumer did not** (six such defects in one refactor, see
+`skills/shared/scripts/README.md`). A compatibility shim manufactures more of them for a
+benefit nobody here collects.
+
+What still applies, and is not compatibility:
+- **Cache version tags** (`sync-extract-v3`, `sync-deepchain-v2`) — these invalidate stale
+  *data*, not old *commands*. Bumping one is how a schema change stays honest; it is
+  enforced mechanically by `selfcheck.py`'s `tag-covers` check.
+- **Deprecation notices in the user's own SDKs** — those have downstream consumers. This
+  policy is about the plugin, not about `apcore-*`.
+
 ## Commands
 
 | Command | Usage | Description |

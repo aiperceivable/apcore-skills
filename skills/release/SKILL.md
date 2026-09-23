@@ -32,6 +32,11 @@ Execute a coordinated release across multiple apcore ecosystem repositories.
 
 @../shared/subagent-policy.md
 
+> **If you cannot see `<!-- SUBAGENT-POLICY-LOADED -->` above, this include did not expand** — some
+> hosts do not support `@`-includes. Read `skills/shared/subagent-policy.md` directly before continuing; it is
+> normative, not background reading. Proceeding without it silently drops the rules it
+> carries.
+
 **release-specific bindings:**
 
 - **P2 ceiling: 2 x repos.** Flags that reduce it: `--repos`, `--scope`

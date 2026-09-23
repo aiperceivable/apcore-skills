@@ -1,5 +1,8 @@
 ### Apcore Ecosystem Conventions
 
+<!-- CONVENTIONS-LOADED -->
+
+
 Canonical conventions that all apcore repositories must follow. Used by audit, sync, and scaffolding skills.
 
 #### Version Synchronization Rules

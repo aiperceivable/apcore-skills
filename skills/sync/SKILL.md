@@ -185,6 +185,11 @@ Parallelism fan-out:
 
 @../shared/subagent-policy.md
 
+> **If you cannot see `<!-- SUBAGENT-POLICY-LOADED -->` above, this include did not expand** — some
+> hosts do not support `@`-includes. Read `skills/shared/subagent-policy.md` directly before continuing; it is
+> normative, not background reading. Proceeding without it silently drops the rules it
+> carries.
+
 **sync-specific bindings of that policy:**
 
 | Policy | sync's binding |

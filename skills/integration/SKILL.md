@@ -28,6 +28,11 @@ Bootstrap a new framework integration that connects a web framework to the apcor
 
 @../shared/subagent-policy.md
 
+> **If you cannot see `<!-- SUBAGENT-POLICY-LOADED -->` above, this include did not expand** — some
+> hosts do not support `@`-includes. Read `skills/shared/subagent-policy.md` directly before continuing; it is
+> normative, not background reading. Proceeding without it silently drops the rules it
+> carries.
+
 **integration-specific bindings:**
 
 - **P2 ceiling: 4.** Flags that reduce it: n/a
