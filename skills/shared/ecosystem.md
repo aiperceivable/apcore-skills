@@ -25,7 +25,8 @@
 > (the user's location) — the intended behavior.
 >
 > It emits a JSON object with `ecosystem_root`, `repos[]` (each with `name`,
-> `path`, `type`, `language`, `version`, `package_name`, `git_status`, `status`),
+> `path`, `type`, `language`, `version`, `package_name`, `git_status`, `status`,
+> `git_root`, `spec_root`, `conformance_path`, and `release_tag_prefix`),
 > `repos_by_type`, `version_groups`, `cwd_repo`, and the `core_sdks` /
 > `mcp_bridges` / `integrations` shortcuts — exactly the values §0.2–0.7 define.
 > Parse its stdout and proceed to Step 1.
@@ -38,84 +39,68 @@
 
 #### 0.1 Detect Ecosystem Root
 
-Search for the ecosystem root by looking for the `apcore` protocol specification repo. Search strategy:
+The ecosystem root is the parent directory of the `apcore/` and
+`apcore-surfaces/` checkouts. Resolve it in this order:
 
-1. Check current directory for `.apcore-skills.json` — if found, read `ecosystem_root` from it
-2. Search upward from the current directory, checking each ancestor directory for an `apcore/` subdirectory containing `PROTOCOL_SPEC.md`. Continue until the filesystem root is reached or a match is found.
-3. If not found: use `AskUserQuestion` to ask for ecosystem root path
-
-Store `ecosystem_root` — the parent directory containing all apcore repos.
+1. Use the explicit `--root <ecosystem_root>` value when running the script with that option.
+2. Read `ecosystem_root` from `.apcore-skills.json` in the current directory if configured.
+3. Starting at the current directory, walk upward to the nearest directory that contains
+   `apcore/PROTOCOL_SPEC.md` or an `apcore-surfaces/` checkout with an `mcp/`, `a2a/`,
+   `cli/`, or `toolkit/` component directory. Either checkout is enough to find the root.
+4. If the root is still unknown, use `AskUserQuestion` to ask for its path.
 
 #### 0.2 Discover Repositories
 
-Scan `ecosystem_root` for known repository patterns:
+Scan the two monorepos for Core SDK and Surface targets. In the table, `<lang>` is
+a recognized language directory (see `KNOWN_LANGS` in `discover.py`). The current
+packages use `python`, `rust`, and `typescript`. An SDK scaffold becomes a
+discovery target as soon as its language directory contains a build file.
 
-**Core Protocol:**
-| Directory Pattern | Repo Type | Role |
+| Path relative to ecosystem root | Type | Target name |
 |---|---|---|
-| `apcore/` | `protocol` | Protocol specification and docs (reference authority) |
+| `apcore/` with `PROTOCOL_SPEC.md` | `protocol` | `apcore` |
+| `apcore/<lang>/` | `core-sdk` | `apcore-<lang>` |
+| `apcore-surfaces/<component>/` with `docs/` | `docs-site` | `apcore-<component>` |
+| `apcore-surfaces/mcp/<lang>/` | `mcp-bridge` | `apcore-mcp-<lang>` |
+| `apcore-surfaces/a2a/<lang>/` | `a2a-bridge` | `apcore-a2a-<lang>` |
+| `apcore-surfaces/cli/<lang>/` | `cli` | `apcore-cli-<lang>` |
+| `apcore-surfaces/toolkit/<lang>/` | `toolkit` | `apcore-toolkit-<lang>` |
 
-**Core SDKs:**
-| Directory Pattern | Repo Type | Language | Package Name |
-|---|---|---|---|
-| `apcore-python/` | `core-sdk` | Python | `apcore` |
-| `apcore-typescript/` | `core-sdk` | TypeScript | `apcore-js` |
-| `apcore-{lang}/` | `core-sdk` | `{lang}` | varies |
+`<component>` is one of `mcp`, `a2a`, `cli`, or `toolkit`. Discover a language
+package when its directory contains a supported build file. Ignore the former
+standalone Core SDK and Surface checkouts, including their documentation
+checkouts, even if the corresponding monorepo target is absent. The
+`apcore-surfaces/` root groups its components.
 
-**MCP Bridges:**
-| Directory Pattern | Repo Type | Language | Package Name |
-|---|---|---|---|
-| `apcore-mcp-python/` | `mcp-bridge` | Python | `apcore-mcp` |
-| `apcore-mcp-typescript/` | `mcp-bridge` | TypeScript | `apcore-mcp` |
-| `apcore-mcp-{lang}/` | `mcp-bridge` | `{lang}` | varies |
+Also scan for independently maintained sibling projects:
 
-**Other project types** (A2A bridges, toolkits, and future types follow the `apcore-{type}-{lang}` pattern):
-| Directory Pattern | Repo Type | Language | Package Name |
-|---|---|---|---|
-| `apcore-{type}-{lang}/` | `{type}` | `{lang}` | `apcore-{type}` |
-
-**Match priority:** Specific patterns (core-sdk, mcp-bridge, shared-lib, integration, docs-site, placeholder) are checked first. The `apcore-{type}-{lang}` wildcard is a fallback for repos that don't match any specific pattern.
-
-**Framework Integrations:**
-| Directory Pattern | Repo Type | Language | Framework |
-|---|---|---|---|
-| `django-apcore/` | `integration` | Python | Django |
-| `flask-apcore/` | `integration` | Python | Flask |
-| `nestjs-apcore/` | `integration` | TypeScript | NestJS |
-| `tiptap-apcore/` | `integration` | TypeScript | TipTap |
-| `{framework}-apcore/` | `integration` | varies | `{framework}` |
-
-**Shared Libraries:**
-| Directory Pattern | Repo Type | Language |
+| Directory pattern | Type | Examples |
 |---|---|---|
-| `apcore-discovery-python/` | `shared-lib` | Python |
+| `{framework}-apcore/` | `integration` | `django-apcore`, `flask-apcore`, `nestjs-apcore` |
+| `apcore-discovery-<lang>/` | `shared-lib` | `apcore-discovery-python` |
+| `apcore-zh/`, `aipartnerup-docs/` | `docs-site` | Localization and organization docs |
+| `apcore-studio/` | `tooling` | Tooling project |
 
-**Documentation Sites:**
-| Directory Pattern | Repo Type | Description |
-|---|---|---|
-| `apcore-mcp/` (with `mkdocs.yml`, no `src/`) | `docs-site` | MCP documentation site |
-| `apcore-zh/` | `docs-site` | Chinese localization of apcore docs |
-| `aipartnerup-docs/` | `docs-site` | Organization-level documentation |
+Supported build files include `pyproject.toml`, `setup.py`, `package.json`,
+`go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `build.gradle.kts`,
+`composer.json`, `mix.exs`, `Package.swift`, and `*.csproj`. Keep a recognized
+sibling project without a build file as a `placeholder`. Protocol and docs
+targets are present by layout and have no package version.
 
-**Placeholder/Early-stage:**
-| Directory Pattern | Repo Type | Status |
-|---|---|---|
-| `comfyui-apcore/` | `integration` | Early stage (may have only `ideas/` dir) |
-| `express-apcore/` | `integration` | Placeholder — matched by `{framework}-apcore/` wildcard when ready |
-| `apcore-studio/` | `tooling` | Placeholder |
+Store targets in `repos[]` sorted by `name`. Use `name` as a stable ID for target
+selection, references, and reports. Resolve that ID via `repos[]` for every
+filesystem operation.
 
-**Exclude from ecosystem scans** (not apcore SDK/integration repos):
-- `aphub*`, `apflow*`, `apdev*`, `aipartnerup-website/` — separate product lines, not part of apcore SDK ecosystem
-
-For each discovered directory:
-1. Check if it contains a valid project (has `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `composer.json`, `mix.exs`, `Package.swift`, or `*.csproj`)
-2. Skip `docs-site` type repos (no build config, only `mkdocs.yml` or markdown files)
-3. Flag `placeholder` repos (directory exists but no source files — report as "empty/placeholder")
-4. Extract version from the build config file
-5. Detect language from build config
-6. Check git status (clean / dirty / uncommitted changes)
-
-Store `repos[]` — list of discovered repository objects with: `name`, `path`, `type`, `language`, `version`, `package_name`, `git_status`.
+| Field | Meaning |
+|---|---|
+| `path` | Absolute working directory for this package or documentation target |
+| `git_root` | Absolute owning checkout directory. Core targets share `apcore/`, and Surface targets share `apcore-surfaces/`. |
+| `spec_root` | Absolute directory containing the specification for the target, or `null`. For Core this is `apcore/`, and for a Surface it is `apcore-surfaces/<component>/`. |
+| `conformance_path` | Absolute path to `<spec_root>/conformance/` when present, or `null` |
+| `release_tag_prefix` | The package's `.unirelease.toml` `tag_prefix`, e.g. `core/python/v`. An independent buildable target defaults to `v` if unset. A monorepo package without a configured prefix returns `null`. |
+| `type`, `status` | Target type and one of `ok`, `placeholder`, `protocol`, or `docs-site` |
+| `language`, `version`, `package_name` | Language from the monorepo directory or sibling build config. Read the package name and version from the target's own build config. |
+| `git_status` | `clean`, `dirty`, or `unknown`. Run Git from `git_root` with a pathspec for `path` so sibling packages' changes do not mark a language package dirty. |
 
 #### 0.3 The `--scope` vocabulary (shared — every skill uses these exact values)
 
@@ -135,27 +120,33 @@ NOT invent extra values, drop a value from the list, or give one a different mea
 skill that genuinely cannot act on a value reports why — it does not treat it as an
 unknown flag.
 
-Further `scope_group` names exist in discovery output (`a2a`, `toolkit`, `shared`,
-`tooling`, `docs`, and any `apcore-{type}-{lang}` wildcard). They are **not** `--scope`
-values yet: no skill has a defined behaviour for them. Reaching those repos today is done
-by naming them positionally.
+Further `scope_group` names exist in discovery output (`a2a`, `cli`, `toolkit`, `shared`,
+`tooling`, and `docs`). Select those targets by CWD or by target ID using the
+skill's selector, such as `audit --repo <target-id>` or a positional ID in
+`sync`. The `--scope` values remain the four listed above.
 
 #### 0.3.1 Detect CWD Repo
 
-Determine `cwd_repo` — the repo the user is currently working in:
-1. Get CWD basename (e.g., `apcore-python`)
-2. Match against `repos[]` by name
-3. If matched, store `cwd_repo = { name, type, language, scope_group }`:
+Determine `cwd_repo` using the resolved absolute paths. Start at CWD and walk up
+its parents until a directory equals a discovered target's `path`. The first
+match is the most specific target, so `apcore/python/src/apcore/` selects
+`apcore-python`, and `apcore-surfaces/mcp/typescript/src/` selects
+`apcore-mcp-typescript`. A component's documentation directory selects the
+component's docs target. The ecosystem directory, the `apcore-surfaces/`
+container, and former standalone SDK checkouts have no matching target.
+
+For a match, store `cwd_repo = { name, type, language, scope_group }`:
    - `core-sdk` → `scope_group = "core"`
    - `mcp-bridge` → `scope_group = "mcp"`
    - `a2a-bridge` → `scope_group = "a2a"`
+   - `cli` → `scope_group = "cli"`
    - `toolkit` → `scope_group = "toolkit"`
    - `integration` → `scope_group = "integrations"`
    - `protocol` / `docs-site` → `scope_group = "docs"`
    - `shared-lib` → `scope_group = "shared"`
    - `tooling` → `scope_group = "tooling"`
-   - Other `apcore-{type}-{lang}` patterns → `scope_group = "{type}"`
-4. If not matched, `cwd_repo = null`
+
+Set `cwd_repo = null` when no target matches.
 
 This is used by sync, audit, and release as the **default scope** when `--scope` is not specified. If `cwd_repo` is null (CWD is not an apcore repo), each skill should use `AskUserQuestion` to let the user pick a target repo instead of silently scanning everything.
 
@@ -171,8 +162,9 @@ Load configuration by priority (deep-merge):
    - `reference_mcp.python` = `"apcore-mcp-python"`
    - `reference_mcp.typescript` = `"apcore-mcp-typescript"`
    - `version_groups.core` = auto-populated from all discovered `core-sdk` repos (e.g., `["apcore-python", "apcore-typescript", "apcore-rust", ...]`)
-   - `version_groups.mcp` = auto-populated from all discovered `mcp-bridge` repos (e.g., `["apcore-mcp-python", "apcore-mcp-typescript", ...]`)
-   - Other `version_groups.{type}` are auto-populated from discovered `apcore-{type}-{lang}` repos
+   - `version_groups.mcp` = auto-populated from all discovered `mcp-bridge` repos (e.g., `["apcore-mcp-python", "apcore-mcp-rust", "apcore-mcp-typescript"]`)
+   - `version_groups.a2a` and `version_groups.cli` are auto-populated from discovered A2A and CLI packages, respectively
+   - Toolkit has no automatic `version_groups` entry. Audit D3 checks each Toolkit package's manifest and in-source version when available. Cross-language Toolkit API and conformance checks still use the shared component root.
 
 2. **User global config** (`~/.apcore-skills.json`, if exists) → deep-merge
 
@@ -185,12 +177,12 @@ Load configuration by priority (deep-merge):
 | `pyproject.toml` | `[project] version = "X.Y.Z"` |
 | `package.json` | `"version": "X.Y.Z"` |
 | `Cargo.toml` | `[package] version = "X.Y.Z"` |
-| `go.mod` | Tag-based (check `git tag -l 'v*'` for latest) |
+| `go.mod` | Highest stable version from Git tags matching the target's `release_tag_prefix` |
 | `pom.xml` | `<version>X.Y.Z</version>` |
 | `build.gradle` | `version = 'X.Y.Z'` or `version 'X.Y.Z'` |
 | `build.gradle.kts` | `version = "X.Y.Z"` |
 | `mix.exs` | `version: "X.Y.Z"` in `project/0` |
-| `Package.swift` | Version constant or git tag-based |
+| `Package.swift` | Highest stable version from Git tags matching the target's `release_tag_prefix` |
 | `*.csproj` | `<Version>X.Y.Z</Version>` |
 | `composer.json` | `"version": "X.Y.Z"` |
 | `__init__.py` / `_version.py` | `__version__ = "X.Y.Z"` |
@@ -200,24 +192,19 @@ For Python projects, also check `src/*/__init__.py` for `__version__`.
 
 #### 0.6 Display Discovery Summary
 
+For each discovered target, show its ID, path relative to the ecosystem root,
+type, language, version, and Git status.
+
 ```
 apcore-skills — Ecosystem Dashboard
 
-Ecosystem root: /path/to/aipartnerup/
-Repos discovered: {count}
+Ecosystem root: {ecosystem_root}
+Targets discovered: {count}
 
-  Type          | Repo                    | Lang       | Version | Status
-  protocol      | apcore                  | —          | —       | clean
-  core-sdk      | apcore-python           | Python     | 0.7.0   | clean
-  core-sdk      | apcore-typescript       | TypeScript | 0.7.1   | dirty
-  core-sdk      | apcore-rust             | Rust       | 0.1.0   | clean
-  mcp-bridge    | apcore-mcp-python       | Python     | 0.8.1   | clean
-  mcp-bridge    | apcore-mcp-typescript   | TypeScript | 0.8.1   | clean
-  integration   | django-apcore           | Python     | 0.2.0   | clean
-  integration   | flask-apcore            | Python     | 0.3.0   | clean
-  integration   | nestjs-apcore           | TypeScript | 0.1.0   | clean
-  integration   | tiptap-apcore           | TypeScript | 0.1.0   | clean
-  shared-lib    | apcore-discovery-python | Python     | —       | clean
+  Target ID          | Relative path            | Type       | Language | Version   | Git status
+  apcore             | apcore/                  | protocol   | —        | —         | {git_status}
+  apcore-python      | apcore/python/           | core-sdk   | Python   | {version} | {git_status}
+  apcore-mcp-rust    | apcore-surfaces/mcp/rust/ | mcp-bridge | Rust     | {version} | {git_status}
 ```
 
 #### 0.6a Canonical Report Save Paths
@@ -226,7 +213,7 @@ Every skill that produces a report and accepts `--save` MUST use these canonical
 
 | Skill | Invocation | Canonical default path |
 |---|---|---|
-| audit | `/apcore-skills:audit --save` (no arg) | `{ecosystem_root}/audit-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
+| audit | `/apcore-skills:audit --save` (no path) | `{ecosystem_root}/audit-report-{target}-{YYYY-MM-DD}.md` (`{target}` is the primary target ID for target-based audits, or the session's CWD repo/dir name for group audits) |
 | audit (from release gate) | release Step 2.5.1 | `{ecosystem_root}/release-audit-{version}.md` |
 | sync | `/apcore-skills:sync --save` (no arg) | `{ecosystem_root}/sync-report-{cwd_repo}-{YYYY-MM-DD}.md` (`{cwd_repo}` = the session's CWD repo/dir name from Step 0, so same-day runs from different repos don't overwrite each other; re-running the same scope on the same day overwrites idempotently) |
 | sync Phase A only | `/apcore-skills:sync --skip-docs --save` | `{ecosystem_root}/sync-report-phase-a-{cwd_repo}-{YYYY-MM-DD}.md` |

@@ -12,6 +12,9 @@
 
 set -euo pipefail
 
+# Keep module imports during selftests from writing bytecode into the checkout.
+export PYTHONDONTWRITEBYTECODE=1
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-python3}"
 

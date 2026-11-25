@@ -53,12 +53,13 @@ Comprehensive consistency audit across all apcore ecosystem repositories.
 ## Command Format
 
 ```
-/apcore-skills:audit [--scope core|mcp|integrations|all] [--fix] [--deep-chain on|off] [--strict] [--save report.md]
+/apcore-skills:audit [--repo <target-id> | --scope core|mcp|integrations|all] [--fix] [--deep-chain on|off] [--strict] [--save report.md]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all` — the shared scope vocabulary from `shared/ecosystem.md` §0.3, identical across every skill. **If omitted and no positional repos, defaults to the current working directory's repo only.** |
+| `--repo` | — | Primary target ID from discovery, for example `apcore-mcp-rust`. Applies the same dimension and peer rules as the CWD target. |
+| `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all` per `shared/ecosystem.md` §0.3. When both selectors are omitted, resolve the primary target from CWD. |
 | `--fix` | off | Auto-fix issues where safe |
 | `--deep-chain` | **`off`** | Cross-language deep-chain analysis (D11). Set `--deep-chain on` to enable. **Off by default**: D11 delegates to `sync` Step 4C, which spawns one sub-agent per logical module — 22 on `apcore/`, an estimated ~4.4 M tokens cold, an order of magnitude more than every other dimension combined. Enable it deliberately, scoped: `--deep-chain on` plus sync's `--modules`. What you lose by leaving it off is chain-level divergence only — **D10 still compares declared contract shape on every run**, and on this ecosystem D10 alone produced 331 divergences including 10 criticals. Same spelling and default as `apcore-skills:sync --deep-chain`, deliberately: D11 *is* sync's Step 4C. |
 | `--strict` | off (lean mode) | Re-enable noise-prone finding classes that are suppressed by default. By default the audit suppresses language-idiom downgrades (`defensive-depth`, `error-class-name-only`, `async-no-work`, `constructor-name-idiom`, `type-wrapping`), D2 style-only nits (clippy lints whose suggestion is just `allow(...)` or rename-for-idiom), and findings tagged `[verify-spec-first]` (where the audit cannot independently determine which spec interpretation is authoritative). Pass `--strict` before a release audit when you want the full surface. **Real bugs are never suppressed** — `critical`/`blocker` findings, spec violations, dead code (D9), and API surface gaps (D1) always surface regardless of this flag. |
@@ -131,35 +132,49 @@ Step 0 (ecosystem) → Step 1 (parse args) → Step 2 (parallel audits) → Step
 
 ### Step 1: Parse Arguments and Plan Audit
 
-Parse `$ARGUMENTS` for flags. Recognized flags: `--scope`, `--fix`, `--deep-chain`, `--strict`, `--save`.
+Parse `$ARGUMENTS` for flags. Recognized flags: `--repo`, `--scope`, `--fix`, `--deep-chain`, `--strict`, `--save`.
+Require exactly one target ID when `--repo` is present. Reject combining
+`--repo` with `--scope`.
 
 **`DEEP_CHAIN`** — `on` if `--deep-chain on` appears, else `off` (the default). Every check below tests `DEEP_CHAIN`, never raw flag text.
 
 **Set `STRICT_MODE`:** `true` if `--strict` appears anywhere in `$ARGUMENTS`, else `false`. Pass this value to the Step 2.5.5 suppression pass and surface it in the Step 3 report header.
 
-#### 1.1 CWD-based Default Scope
+#### 1.1 Resolve the Primary Target
 
-**If `--scope` is NOT specified:**
-1. Detect CWD repo name (basename of CWD)
-2. Look up in discovered ecosystem:
+When `--scope` is specified, set `scope` to the validated flag value and use
+Step 1.2. Otherwise:
+
+1. Resolve the primary target in Step 0's `repos[]` by exact ID. Use the
+   `--repo` value when supplied, regardless of CWD. For an unknown explicit ID,
+   fail before running checks and show available IDs. With no explicit
+   selector, use `cwd_repo.name`. If discovery has no CWD target, ask the user
+   to pick a discovered ID or `all`. If the user picks `all`, set `scope = all`
+   and use Step 1.2.
+2. For a resolved primary target, set `scope = target:<id>` using its discovered
+   ID, for example `target:apcore-mcp-rust`. Use this value in both the scope
+   display and the saved report. Apply these audit dimensions to the primary
+   target and any applicable peers:
    - `core-sdk` repo → audit this repo + sibling core-sdks in the same sync group, dimensions D1-D3, D5-D6, D8-D10 (D10 needs ≥2 repos in the same group to compare)
    - `mcp-bridge` repo → audit this repo + sibling mcp-bridges, dimensions D1-D3, D5-D6, D8-D10
+   - `a2a-bridge`, `cli`, or `toolkit` package → use the same dimensions and include peers sharing its `spec_root` when available
    - `integration` repo → audit this repo, dimensions D2-D10. For D10, auto-pull in the relevant core SDK (matching the integration's language — e.g., django-apcore → apcore-python; nestjs-apcore → apcore-typescript) AND the `apcore/` doc repo as **read-only peers** for the Consumer Contract Check (Step 4 of the D10 prompt). Dimensions D2–D9 still apply only to the integration repo itself.
    - `protocol`/`docs-site` repo → audit documentation dimensions (D4) and bloat (D9) for this repo
    - `shared-lib`/`tooling` repo → audit D2 (naming), D4 (docs), D5 (tests), D8 (structure), D9 (bloat) for this repo
-   - CWD not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to audit?" with options from `repos[]` names + "All repos (full ecosystem audit)"
-3. Display: "Scope: {repo-name} (from CWD). Use --scope all for full ecosystem audit."
-
-**If `--scope` IS specified:** use explicit scope.
+3. Record and display the primary target ID and the resolved peer IDs.
 
 #### 1.2 Scope → Repos & Dimensions
 
 | Scope | Repos | Dimensions |
 |---|---|---|
 | `core` | Core SDKs + `apcore/` doc repo | D1-D3, D5-D6, D8-D11 (D4 covers `apcore/` only) |
-| `mcp` | MCP bridges + `apcore-mcp/` doc repo | D1-D3, D5-D6, D8-D11 (D4 covers `apcore-mcp/` only) |
+| `mcp` | MCP bridges + their component spec root | D1-D3, D5-D6, D8-D11 (D4 covers the MCP spec root only) |
 | `integrations` | Framework integrations + auto-pulled core SDKs (per-integration language) + `apcore/` doc repo as read-only peers | D2-D9 on integration repos; **D10 Consumer Contract Check** verifies each integration uses its matching core SDK per the core SDK's current Contract. **D11 skipped** (integrations are single-language; no cross-language chain to diff). |
-| `all` | All repos | All dimensions including D11 on core + mcp groups |
+| `all` | All targets | All applicable dimensions, including D11 within eligible peer groups |
+
+Resolve implementation directories from `repos[].path` and the corresponding
+specification from `repos[].spec_root`. For ecosystem-wide checks keep each
+component's peer group and specification together.
 
 **D9 (Bloat & Redundancy) is always included.** It applies to every scope and every repo type — it is the apcore ecosystem's primary defense against the additive bias of skill-driven feature work.
 
@@ -171,12 +186,13 @@ Both modes can run in the same audit invocation — a `--scope all` run exercise
 
 **D11 (Deep-Chain Parity) trigger rule.** Runs whenever ≥2 same-type impl repos are in scope AND D10's Parity mode is active (they share the "need peers to compare against" precondition). Skipped with INFO when:
 - Only 1 impl repo in scope (no peer)
-- Scope is `integrations` only (single-language chain analysis is code-forge:review's job)
+- Only integration targets were selected (single-language chain analysis is code-forge:review's job)
 - `DEEP_CHAIN == off` (the default) — skip D11 **and emit the NOT RUN disclosure** required by `sync` SKILL.md 4C.0, rendered in the D11 slot of the audit report. An absent D11 section and a clean D11 section must not look alike. (escape hatch for fast audits)
 
 Display:
 ```
-Audit scope: {scope} {("(from CWD)" if defaulted)}
+Audit scope: {scope}
+Primary target: {target ID for a target-based audit}
 Repos: {count} repositories
 Dimensions: {list}
 ```
@@ -195,7 +211,9 @@ Run once:
 python3 "$CLAUDE_PLUGIN_ROOT/skills/shared/scripts/audit-mechanical.py" --root {ecosystem_root}
 ```
 
-Add `--repos {name1},{name2}` when Step 1 resolved a narrower scope, and `--only D3,D8` to run a subset. Output is a single JSON object on stdout.
+For a target-based audit or a narrower group, pass the exact resolved IDs for
+the mechanical dimensions as `--repos {name1},{name2}`. An empty target set
+skips the pass. Use `--only D3,D8` to run a subset. Output is a JSON object on stdout.
 
 **Consuming the output.** For each key in `dimensions{}`, take `findings[]` verbatim — the fields (`severity`, `repo`, `detail`, `location`, `fix`, `evidence`) are already the uniform finding format, so they merge directly into the Step 2.5 list with no reformatting. D7 additionally carries `config_matrix` (inconsistent settings only) and `config_matrix_consistent_count` for the Step 3 report.
 
@@ -396,6 +414,7 @@ apcore-skills audit — Ecosystem Consistency Report
 
 Date: {date}
 Scope: {scope}
+Primary target: {target ID for a target-based audit}
 Mode: {"strict (all findings)" if STRICT_MODE else "lean (style/idiom/verify-spec suppressed — pass --strict for all)"}
 Repos audited: {count}
 Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-deduplicated · {n_unverified_claim} unverified-factual-claim · {n_info_nitpick} info-nitpick · {n_info_consolidated} info-consolidated · {n_strict_suppressed} strict-only ({"hidden — pass --strict to see" if !STRICT_MODE else "shown"})
@@ -515,7 +534,9 @@ Noise-Control: {n_total_drops} findings suppressed · {n_d10_d11_dedup} d10-d11-
 
 **Score formulas:** Leanness (D9) and Contract Parity (D10) formulas are defined canonically in `shared/scoring.md`. Use those formulas — do not re-implement. Any threshold change (e.g., release-gate BLOCK threshold) must be updated there, not inline here.
 
-If `--save` flag is passed with an explicit path, write to that path. If `--save` is passed without a path, write to the canonical default from `shared/ecosystem.md` §0.6a: `{ecosystem_root}/audit-report-{cwd_repo}-{YYYY-MM-DD}.md`, where `{cwd_repo}` is the session's CWD repo/dir name resolved in Step 0. Including `{cwd_repo}` keeps same-day runs from different repos in separate files (no cross-scope overwrite); a re-run of the same scope on the same day overwrites its own file idempotently. The Write is always a full-file overwrite — reports are never concatenated with prior runs.
+Use an explicit `--save` path when supplied. For bare `--save`, use the
+canonical path from `shared/ecosystem.md` §0.6a with the resolved primary target
+ID when applicable. Use a full-file overwrite for the report.
 
 ---
 

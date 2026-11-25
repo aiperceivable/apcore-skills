@@ -97,8 +97,9 @@ command runs every guard rail:
 skills/shared/scripts/test.sh
 ```
 
-It runs `discover.py --selftest` (name→type classification + every version-string
-parser), `score.py --selftest` (every formula, gate precedence, unrounded-boundary
+It runs `discover.py --selftest` (monorepo layout, sibling checkout classification,
+deep CWD selection, package tag versions, and version parsers),
+`score.py --selftest` (every formula, gate precedence, unrounded-boundary
 behavior), `audit-mechanical.py --selftest`, `extract_cache.py --selftest` (hash
 stability, exclusion list, `--extra` participation, check/put/clear round-trip),
 and a `bash -n` syntax check on `extract-markers.sh` (plus `shellcheck` when

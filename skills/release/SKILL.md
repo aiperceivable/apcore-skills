@@ -39,8 +39,8 @@ Execute a coordinated release across multiple apcore ecosystem repositories.
 
 **release-specific bindings:**
 
-- **P2 ceiling: 2 x repos.** Flags that reduce it: `--repos`, `--scope`
-- **P1/P3 plan:** Each phase spawns one per repo and the phases run **sequentially** - never hold more than one phase's fan-out in flight. With ~23 repos discovered, 'one per repo, all simultaneously' repeated across five phases is 115 sub-agents; P4's batch-of-3 bound applies to every one of those phases.
+- **P2 ceiling: 2 x repos.** Use `--scope` to limit the group.
+- **P1/P3 plan:** Compute the dispatch count from the selected targets. Run phases sequentially and apply P4's batch-of-3 limit to each phase.
 - **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
 ## Iron Law
@@ -106,11 +106,10 @@ Parse `$ARGUMENTS`:
 #### 1.1 CWD-based Default Scope
 
 **If `--scope` is NOT specified:**
-1. Detect CWD repo name (basename of CWD)
-2. Look up in discovered ecosystem:
-   - If it's a known apcore repo → release **only this repo**
-   - If CWD is a `protocol`/`docs-site` repo → error: "Documentation repos cannot be released directly. Specify --scope core|mcp|integrations|all, or name the repos positionally. Valid values are the shared vocabulary in `shared/ecosystem.md` §0.3."
-   - If CWD is not an apcore repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to release?" with options from `repos[]` names + "All repos (group release)"
+1. Use Step 0's `cwd_repo` and resolve `cwd_repo.name` in `repos[]`.
+2. A buildable target selects that package only. For a protocol or docs target,
+   ask the user to choose a buildable package or request a group with `--scope`.
+   If `cwd_repo` is null, ask which discovered buildable target to release.
 3. Display: "Release scope: {repo-name} (from CWD). Use --scope core|mcp|integrations|all for group release."
 
 **If `--scope` IS specified:** use explicit scope.
@@ -123,63 +122,51 @@ Parse `$ARGUMENTS`:
 | `core` | All core SDKs |
 | `mcp` | All MCP bridges |
 | `integrations` | Use `AskUserQuestion` to select which integrations |
-| `all` | All repos (use `AskUserQuestion` to confirm version per group) |
+| `all` | All buildable targets (use `AskUserQuestion` to confirm version per component and for independent targets) |
 
-For `all` scope, versions may differ per group:
-- Use `AskUserQuestion`: "Version for core SDKs?" / "Version for MCP bridges?" / "Version per integration?"
+For each selected target record its `name`, package `path`, `git_root`, package
+path relative to `git_root`, intended version, and `release_tag_prefix` from
+Step 0. Form the tag as `<release_tag_prefix><version>`, for example
+`core/python/v0.34.0` or `mcp/typescript/v0.24.0`. A missing monorepo prefix
+requires a valid package-local `.unirelease.toml` before the release proceeds.
+Group targets by `git_root` for Git operations. Keep the tag and version
+alongside the target ID for all later steps.
+
+Identify the dependency updates in Step 5 before pre-flight. Add their owning
+checkouts to the plan with their affected paths, including checkouts whose
+only change is a dependency constraint.
 
 Display release plan:
 ```
 Release Plan:
-  Core SDKs:     {repos} → v{version}
-  MCP Bridges:   {repos} → v{mcp-version}
-  Integrations:  {repos} → v{int-version}
+  Checkout | Target | Package path | Target version | Full tag
   Mode:          {release | dry-run}
 ```
 
 ---
 
-### Step 2: Pre-flight Checks (Parallel Sub-agents — One per Repo)
+### Step 2: Pre-flight Checks
 
-Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneously**:
+For each `git_root`, confirm the branch and origin, check that its working tree
+and index are clean, and record the starting commit. Changes in any package of
+a shared checkout affect this check. Resolve dirty worktrees and unexpected
+branches before creating a release commit.
 
-**Sub-agent prompt:**
-```
-Run pre-flight checks for release in {repo_path}.
+For each selected package, verify the proposed version is greater than its
+current version unless the user explicitly overrides the comparison. A package
+with no prior release may set its first version. Validate the proposed tag with
+`git check-ref-format` and check local and remote refs with that exact tag.
+Two targets in the same checkout must have distinct tags. Report collisions
+before modifying files. An existing remote tag requires a different version or a
+separate recovery decision.
 
-1. Git status: run `git -C {repo_path} status --porcelain` — must be empty (clean)
-   - If dirty: list modified files
-2. Branch: run `git -C {repo_path} branch --show-current` — should be main or master
-3. Current version: extract from build config (pyproject.toml or package.json)
-4. Git tags: run `git -C {repo_path} tag --sort=-v:refname | head -5` — list recent tags
+Find the latest reachable stable release tag with this package's prefix. Use
+that package-specific tag for its changelog range. Preserve the ordinary `v`
+prefix for independent packages that use it. A newly bootstrapped package may
+have no previous tag.
 
-Error handling:
-- If the repo path does not exist, return: REPO: {repo-name}, STATUS: NOT_FOUND
-- If git is not initialized, return: REPO: {repo-name}, STATUS: NO_GIT
-
-Return:
-REPO: {repo-name}
-GIT_STATUS: clean | dirty
-DIRTY_FILES: {list if dirty, empty if clean}
-BRANCH: {current branch name}
-CURRENT_VERSION: {version}
-RECENT_TAGS: {list}
-```
-
-Wait for all pre-flight sub-agents to complete. Aggregate results:
-
-```
-Pre-flight:
-  apcore-python:      ✓ clean, main, 0.7.0 → 0.9.0
-  apcore-typescript:   ✓ clean, main, 0.7.1 → 0.9.0
-  apcore-mcp-python:   ✓ clean, main, 0.8.1 → 0.9.0
-  apcore-mcp-typescript: ⚠ dirty (2 modified files)
-```
-
-For each repo with issues, use `AskUserQuestion` to resolve:
-- Dirty repo: "Stash changes" / "Skip this repo" / "Abort"
-- Wrong branch: "Continue on {branch}" / "Switch to main" / "Abort"
-- Version not < target: "Force version update" / "Skip this repo" / "Abort"
+Display the planned version change, tag, checkout branch and any pre-flight
+issues for each target. Resolve scope or version changes before continuing.
 
 ---
 
@@ -196,9 +183,15 @@ Before bumping any version, run the ecosystem consistency skills and block the r
 
 #### 2.5.1 Run Audit
 
-Invoke audit with scope from Step 1.2 (if scope is `integrations` or CWD-only-integration, use that scope — integrations now audit D2–D10 incl. consumer-contract check per audit/SKILL.md §D10):
-- Normal run: `/apcore-skills:audit --scope {scope} --save {ecosystem_root}/release-audit-{version}.md`
-- Dry-run: `/apcore-skills:audit --scope {scope} --save {mktemp}/release-audit-{version}.md`
+Use the `ecosystem_root` resolved in release Step 0. Set the report path to
+`{ecosystem_root}/release-audit-{version}.md` or the dry-run temp path.
+
+- An explicit group release calls `/apcore-skills:audit --scope {scope} --save {report-path}`.
+- A single-package release without a scope flag calls
+  `/apcore-skills:audit --repo {selected-target-id} --save {report-path}`,
+  using the ID in the release plan. Verify that the report's `Primary target`
+  matches that ID before consuming any scores or findings. A missing or
+  mismatched target requires rerunning the audit with the correct ID.
 
 Wait for audit to complete. Parse the saved report for:
 - **CRITICAL count** across dimensions D1–D11
@@ -209,20 +202,9 @@ Wait for audit to complete. Parse the saved report for:
 
 #### 2.5.2 Run Sync (only when scope has ≥2 peer repos)
 
-Skip if the scope contains only 1 impl repo per language group (single-SDK case).
-
-Invoke sync with the scope mapping below; the save path depends on whether `--dry-run` is active (see Step 2.5's dry-run handling prelude).
-
-Scope mapping:
-- `core` → `--scope core`
-- `mcp` → `--scope mcp`
-- `all` → `--scope all`
-- `integrations` → skip sync (integrations have no cross-language peers by design)
-
-Normal run: `/apcore-skills:sync --scope {mapped} --save {ecosystem_root}/release-sync-{version}.md`
-Dry-run: `/apcore-skills:sync --scope {mapped} --save {mktemp}/release-sync-{version}.md`
-
-(`--internal-check=contract` is the sync default since v0.10; no need to pass it explicitly.)
+Skip if no component has multiple selected language packages. Invoke `sync`
+with the selected package IDs for those components as positional arguments.
+Pass `--save {ecosystem_root}/release-sync-{version}.md` or the dry-run temp path.
 
 Wait for sync to complete. Parse the saved report for:
 - CRITICAL findings in Phase A (spec ↔ impl) and Phase B (docs)
@@ -285,7 +267,7 @@ For TypeScript repos:
 
 For Go repos:
 1. Version constant in internal/version.go or cmd/version.go (if exists)
-2. Go modules use git tags (v{new_version}) — note for Step 7 tagging
+2. Go modules derive their version from the package tag resolved in Step 1.2
 
 For Rust repos:
 1. Cargo.toml → [package] version = "{new_version}"
@@ -347,8 +329,7 @@ Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneousl
 Generate a CHANGELOG entry for {repo_path} version {new_version}.
 
 1. Read the current CHANGELOG.md
-2. Run: git -C {repo_path} log --oneline {last_tag}..HEAD
-   (If no tags exist, use the last 50 commits)
+2. Run `git -C {git_root} log --oneline {last_tag}..HEAD -- {package_relative_path}` with the tag found in Step 2. Without a prior package tag, use `git -C {git_root} log -50 --oneline -- {package_relative_path}`.
 3. Categorize commits into:
    - **Added** — new features (feat:)
    - **Changed** — modifications to existing features (refactor:, perf:)
@@ -357,7 +338,7 @@ Generate a CHANGELOG entry for {repo_path} version {new_version}.
    - **Documentation** — doc changes (docs:)
    - **Other** — everything else (chore:, ci:, test:)
 
-   **Augment classification from Step 2.5 gate findings.** Read `{ecosystem_root}/release-sync-{version}.md`. For every finding in sync Phase A (signature change) or sync Step 4B (Contract tier — inputs/errors/side-effects/return/properties divergence from prior version), cross-reference the commit that introduced it (via `git log -S`). Any such commit MUST land in the `### Breaking` section even if its prefix was `fix:` or `refactor:`. Emit a note under the entry: `Breaking (contract): {finding summary} — was classified as {prefix} in commit history`.
+   **Augment classification from Step 2.5 gate findings.** Read the sync report if Step 2.5.2 produced one. For every finding in sync Phase A (signature change) or sync Step 4B (Contract tier — inputs/errors/side-effects/return/properties divergence from prior version), cross-reference the commit that introduced it (via `git log -S`). Any such commit MUST land in the `### Breaking` section even if its prefix was `fix:` or `refactor:`. Emit a note under the entry: `Breaking (contract): {finding summary} — was classified as {prefix} in commit history`.
 
    Also include any A-001 / A-C-{seq} / B-001 finding IDs referenced in the commits. The finding ID + a one-line description goes into the CHANGELOG entry so downstream consumers can trace.
 4. Write the new entry at the top of CHANGELOG.md, after any existing header:
@@ -406,7 +387,10 @@ Display preview of each CHANGELOG entry for user review.
 
 **Skip condition:** If `--scope integrations` (only integration repos in this release, no core SDKs or MCP bridges), skip this step entirely and note: "Dependency versions unchanged — core SDKs/MCP bridges not part of this release."
 
-For integration repos that depend on core SDKs or MCP bridges being released, spawn one `Agent(subagent_type="general-purpose")` **per integration repo, all simultaneously**:
+For integrations in the pre-flighted dependency plan that depend on Core SDKs
+or MCP bridges being released, spawn one `Agent(subagent_type="general-purpose")`
+per integration. Match each dependency to the released package's language and
+target version.
 
 **Sub-agent prompt:**
 ```
@@ -450,13 +434,14 @@ Spawn one `Agent(subagent_type="general-purpose")` **per repo, all simultaneousl
 
 **Sub-agent prompt:**
 ```
-Run the full test suite for {repo_path} and report results.
+Run the full test suite for {repo_path} and report results. Include any
+dependency-only integration changed in Step 5.
 
 Detect the language from the build config file and use the appropriate test command:
 - Python (pyproject.toml): cd {repo_path} && python -m pytest --tb=short -q 2>&1
-- TypeScript (package.json): cd {repo_path} && npx vitest run 2>&1
+- TypeScript (package.json): use the test command from this package or its checkout CI (pnpm for monorepo packages).
 - Go (go.mod): cd {repo_path} && go test ./... 2>&1
-- Rust (Cargo.toml): cd {repo_path} && cargo test 2>&1
+- Rust (Cargo.toml): use the test command and features from this package or its checkout CI.
 - Java/Maven (pom.xml): cd {repo_path} && mvn test -q 2>&1
 - Java/Gradle (build.gradle): cd {repo_path} && gradle test 2>&1
 - C# (*.csproj): cd {repo_path} && dotnet test 2>&1
@@ -479,115 +464,79 @@ Error handling:
 - Do NOT fail the entire release if test runner is unavailable — report and let user decide
 ```
 
-**After per-repo unit tests pass, run shared conformance fixtures.** Skip when scope is `integrations` only (no shared fixtures for integrations).
-
-Invoke `/apcore-skills:tester --category conformance --mode run --save {ecosystem_root}/release-tester-{version}.md` scoped to the same repos. This runs each SDK's `conformance_runner` against shared fixtures from the doc repo, producing a cross-language divergence matrix.
-
-If any conformance case diverges (mixed PASS/FAIL), treat it as a release-blocking failure — the "same input, different output" bug class cannot ship.
+For selected packages with `conformance_path`, call
+`/apcore-skills:tester {selected-package-ids} --category conformance --mode run --save {ecosystem_root}/release-tester-{version}.md`.
+Pass the IDs as separate positional arguments. Tester runs their native
+fixture-driven tests against each package's shared suite. A failing assertion,
+behavioral divergence, or unavailable suite for a selected package blocks its
+release. Treat a missing Core or Surface fixture path as an unavailable suite.
+Report unverified per-case evidence separately.
 
 Display results:
 ```
 Test verification:
-  Per-repo unit tests:
-    apcore-python:       ✓ 393/393 passing
-    apcore-typescript:    ✓ 287/287 passing
-    apcore-mcp-python:   ✓ 156/156 passing
-    django-apcore:       ✓ 644/644 passing
-  Shared conformance fixtures:
-    apcore-python:       ✓ 82/82 passing
-    apcore-typescript:    ✗ 79/82 passing — 3 DIVERGENT cases
-    apcore-rust:         ✓ 82/82 passing
+  Unit tests by target:
+    {target-id}: {passed}/{total} passed, {failed} failed, {skipped} skipped
+  Shared conformance by component:
+    {component} / {target-id}: {passed}/{total} passed, {failed} failed, {unverified} unverified
   Cross-language divergent cases: {N}
 ```
 
-If any repo's unit tests fail OR any conformance case diverges:
+If unit tests or the conformance verification fail:
 - Display failure / divergence details
 - Use `AskUserQuestion`: "How to proceed?"
   - "Fix and retry" — investigate failures (route conformance divergences to `/code-forge:fix --review` consuming the tester report)
-  - "Skip this repo" — exclude from release (NOT available for conformance divergences — divergence means a lie about cross-language equivalence, cannot be skipped per-repo)
-  - "Abort release" — stop everything, revert version bumps:
-    For each repo already bumped in Step 3/4: `git -C {repo_path} checkout -- {list of modified files}`
-    (Safe because Step 7 commit has not yet run — only uncommitted changes are discarded)
+  - "Skip this target" — for a unit-test failure, restore this run's edits using the pre-flight baseline, remove the failed target from the plan, and recompute dependency updates and verification before committing. Resolve shared-suite failures before proceeding.
+  - "Abort release" — use the release file lists and the Step 2 baseline to revert only this run's edits, including any dependency changes. Preserve unrelated changes and remove only files created by the run.
 
 ---
 
-### Step 7: Commit Changes
+### Step 7: Commit by Checkout
 
-For each repo with changes:
-
-1. Stage only the files modified by version bump and CHANGELOG generation — use `git add` with explicit file paths (e.g., `git add pyproject.toml src/apcore/__init__.py CHANGELOG.md`)
-2. **NEVER use `git add -A` or `git add .`** — this risks staging untracked files, `.env`, build artifacts, or other sensitive content
-3. Commit with release message:
+Make one local release commit per changed `git_root`. Combine and deduplicate
+exact repository-relative paths from the version, changelog, and dependency
+updates. Include a dependency-only checkout if the changes are part of this
+release. Check the staged diff against this list and commit only those paths.
+Record the new commit SHA and associate it with the plan's package tags for
+that checkout.
 
 ```bash
-cd {repo_path} && git add {list of modified files} && git commit -m "release: v{new_version}"
-```
-
-Display:
-```
-Commits created:
-  apcore-python:       release: v0.9.0 (3 files)
-  apcore-typescript:    release: v0.9.0 (2 files)
-  apcore-mcp-python:   release: v0.9.0 (3 files)
+git -C "$git_root" add -- "${release_paths[@]}"
+git -C "$git_root" diff --cached --stat
+git -C "$git_root" commit -m "release: $release_summary" -- "${release_paths[@]}"
 ```
 
 ---
 
 ### Step 8: Release Summary and Approval
 
-```
-apcore-skills release — Summary
-
-Version: {version}
-Repos released: {count}
-
-  Repo                    | Version       | Files | Tests  | Commit
-  apcore-python           | 0.7.0 → 0.9.0 |   3   | 393 ✓  | abc1234
-  apcore-typescript        | 0.7.1 → 0.9.0 |   2   | 287 ✓  | def5678
-  apcore-mcp-python       | 0.8.1 → 0.9.0 |   3   | 156 ✓  | ghi9012
-  apcore-mcp-typescript    | 0.8.1 → 0.9.0 |   2   | 112 ✓  | jkl3456
-
-CHANGELOG entries generated: {count}
-Dependency updates: {count}
-
-All changes committed locally. Nothing has been pushed.
-```
-
-Use `AskUserQuestion`:
-- "Review changes first" — show `git diff HEAD~1` for each repo
-- "Push all repos" → Step 9
-- "Push selected repos" → Step 9 with selection
-- "Done (keep local commits, don't push)" — stop here
+Show each checkout's branch, release commit, changed files, packages, full tags,
+and verification results. Ask for explicit approval to push all eligible
+checkouts or a selected subset of checkouts. A shared checkout's branch push
+includes its complete release commit. To narrow this to a subset of its
+packages, revise the plan and commit before asking for push approval.
 
 ---
 
 ### Step 9: Push and Tag (only with explicit approval)
 
-For each approved repo:
+For each approved checkout, confirm the release branch still points at the
+reviewed commit. Create each planned tag on that commit. On retry, reuse a local
+tag only when it points to the reviewed release commit. Refuse to replace a tag
+at another commit.
+
+Push the approved branch and all of its planned tag refs together. Construct
+`release_refs` from the full branch ref and exactly the planned tags. For
+example, a Core release can use `refs/heads/main`,
+`refs/tags/core/python/v0.34.0` and `refs/tags/core/rust/v0.34.0`.
 
 ```bash
-cd {repo_path} && git push origin {branch} && git tag v{new_version} && git push origin v{new_version}
+git -C "$git_root" push --atomic origin "${release_refs[@]}"
 ```
 
-**Error handling:** If push fails for any repo:
-- Display the error message (auth failure, rejected push, network error)
-- Use `AskUserQuestion`: "Push failed for {repo}."
-  - "Retry" — attempt push again
-  - "Skip this repo" — continue with remaining repos
-  - "Abort remaining pushes" — stop, display which repos were pushed and which were not
-- If rejected due to remote changes: warn user to `git pull --rebase` first, do NOT force-push
-
-Display:
-```
-Push complete:
-  apcore-python:       pushed + tagged v0.9.0
-  apcore-typescript:    pushed + tagged v0.9.0
-
-Next steps:
-  Create GitHub releases (if desired)
-  Publish packages:
-    cd apcore-python && python -m build && twine upload dist/*
-    cd apcore-typescript && npm publish
-  Update documentation site
-  Announce release
-```
+If the remote rejects the atomic push or the connection drops, inspect the
+exact branch and tag refs before retrying. Preserve the reviewed refs for retry
+and report what reached the remote. Stop for that checkout on tag conflicts,
+branch changes, or lack of atomic support. Never force-push. Report the exact
+pushed tags and any pending checkouts. Resolve any subsequent registry commands
+from each package's `path`.

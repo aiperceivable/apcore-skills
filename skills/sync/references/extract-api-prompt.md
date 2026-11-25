@@ -1,10 +1,11 @@
 # Extract Public API — Sub-agent Prompt Template
 
-Variables to fill: `{repo_path}`, `{package}`, `{output_path}`
+Variables to fill: `{repo_path}`, `{doc_repo}`, `{package}`, `{output_path}`
 
 ---
 
 Extract the complete public API surface from {repo_path}.
+Specification root for the caller's comparison: {doc_repo} (from discovery).
 
 **FIRST — read `shared/api-extraction-protocol.md`.** It is the normative
 extraction protocol; the numbered summary below is a checklist, not a

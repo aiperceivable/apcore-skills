@@ -1,6 +1,6 @@
 # Extract API Contract — Sub-agent Prompt Template
 
-Variables to fill: `{lang}`, `{ref_path}`, `{type}`, `{protocol_path}`
+Variables to fill: `{lang}`, `{ref_path}`, `{type}`, `{protocol_path}`, `{spec_root}`
 
 ---
 
@@ -18,7 +18,8 @@ Project type: {type}
 5. Find extension points / interfaces that consumers are expected to implement
 
 Also read:
-- {protocol_path}/PROTOCOL_SPEC.md — for authoritative definitions
+- {spec_root}/docs/features/ and the component's normative spec files — for component contracts
+- {protocol_path}/PROTOCOL_SPEC.md — for shared Core definitions when available
 - {protocol_path}/docs/spec/type-mapping.md — if exists, for type translations
 - {ref_path}/examples/ — list all example files, directories, and their purpose (for porting)
 - {ref_path}/tests/ — list complete test directory structure and all test file names (for mirroring)
@@ -82,7 +83,7 @@ TESTS:
 
 - If the reference repo path does not exist, return: STATUS: NOT_FOUND, REASON: "Reference repo not found at {path}"
 - If the main entry point is missing or empty, return: STATUS: NO_EXPORTS, REASON: "No public exports found"
-- If PROTOCOL_SPEC.md is missing, proceed with reference implementation only and note: "Protocol spec not found, using reference impl as sole authority"
+- If PROTOCOL_SPEC.md is missing, proceed with reference implementation only and note: "Core protocol spec not found; use the component specs and reference implementation"
 - If individual source files cannot be read, skip them and note in the summary
 
 Target ~6-10KB summary.

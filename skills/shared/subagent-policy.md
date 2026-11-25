@@ -6,10 +6,8 @@
 Normative for every skill in this plugin that spawns sub-agents: `sync`, `audit`,
 `tester`, `release`, `integration`, `sdk`. These are hard limits, not guidance.
 
-Cost in this plugin is dominated by sub-agent **count**, not by any single
-sub-agent's depth. The ecosystem this plugin targets has ~23 repos; a rule of the
-form "one per repo, all simultaneously" repeated across five phases is 115
-sub-agents from one command.
+Compute the sub-agent budget from the targets selected for this run. The number
+of targets can grow independently of the number of Git checkouts.
 
 ---
 
@@ -111,7 +109,7 @@ and callers must use it.
 
 `sync` Step 2 writes a complete public-API extraction per repo to:
 
-    {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+    {ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo_name}.extraction.md
 
 It is **ecosystem-wide, not sync-private.** Every skill that needs a repo's public
 surface, per-symbol signatures, per-method behavioral contracts, or a symbol→file map

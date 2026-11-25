@@ -11,7 +11,7 @@
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/aipartnerup/apcore-skills.git
+git clone https://github.com/apstack/apcore-skills.git
 cd apcore-skills
 ```
 

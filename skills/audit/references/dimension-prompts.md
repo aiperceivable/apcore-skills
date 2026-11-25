@@ -47,9 +47,9 @@ When the sub-agent reaches this state — divergence is real, but the *direction
   repo: apcore-mcp-python
   symbol: OpenAIConverter.convert_descriptor
   category: property_mismatch
-  detail: "strict default differs across SDKs: Python=False, TS=True, Rust requires explicit param. Per converters/openai.ts:152 comment the canonical default is True post-0.14.0, but apcore-mcp/docs/features/openai-converter.md was last touched pre-0.14.0 and does not state a default. [verify-spec-first]"
-  location: "apcore-mcp-python/src/apcore_mcp/converters/openai.py:100"
-  fix: "If post-0.14.0 spec default is True (per TS comment): change Python signature to strict=True and note breaking change in CHANGELOG. If pre-0.14.0 default of False is canonical: revert TS comment and align TS to False. Verify against apcore-mcp/docs/features/openai-converter.md HEAD before acting."
+  detail: "strict default differs across SDKs: Python=False, TS=True, Rust requires explicit param. Per converters/openai.ts:152 comment the canonical default is True post-0.14.0, but apcore-surfaces/mcp/docs/features/openai-converter.md was last touched pre-0.14.0 and does not state a default. [verify-spec-first]"
+  location: "apcore-surfaces/mcp/python/src/apcore_mcp/converters/openai.py:100"
+  fix: "Verify the default against apcore-surfaces/mcp/docs/features/openai-converter.md. If True is canonical, update Python and document the breaking change. If False is canonical, align TypeScript with it."
 ```
 
 ---
@@ -244,7 +244,7 @@ For each repo check:
 5. Public API methods have parameter documentation
 6. Examples directory exists (for integrations)
 
-For documentation repos (apcore/, apcore-mcp/) additionally check:
+For each discovered specification root additionally check:
 7. **Contract coverage in feature specs**. **Index first — do not read the corpus.**
    `docs/features/*.md` is 870 KB across 23 files on this ecosystem; a `grep -n` for the
    header patterns gives you every declaration site in a few KB, and you slice a block by
@@ -444,7 +444,7 @@ For each repo, perform ALL of the following checks:
    anywhere in the ecosystem.
 
    **Do not re-enumerate the export surface.** If
-   `{ecosystem_root}/.apcore-skills-cache/sync/api/{repo}.extraction.md` exists, its
+   `{ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo}.extraction.md` exists, its
    `FILE_MAP:` section already lists every public symbol with its defining file —
    measured 285 / 336 / 398 for the three core SDKs, 1,019 in total, each traced through
    its re-export chain to the definition site. Read that section (it is the last block of
@@ -603,7 +603,7 @@ Read `shared/api-extraction-protocol.md` Step E.4b for the per-method contract e
 
 **Before reading any source, check for sync's extraction cache:**
 
-    {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+    {ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo_name}.extraction.md
 
 Those files already carry a `contract:` block per public method, extracted under the
 same protocol you are about to apply (`api-extraction-protocol.md` E.4b) — measured on
@@ -641,7 +641,7 @@ afterwards. Then:
 
 1. For each indexed `## Contract: ClassName.method_name` block
 2. Parse `### Inputs`, `### Preconditions`, `### Side Effects`, `### Postconditions`, `### Errors`, `### Returns`, `### Properties`
-3. Store as `spec_contracts[scope][symbol]` — canonical two-level keying per `shared/contract-spec.md` §Canonical Storage Shape. `scope` is the doc-repo group (derived from `{doc_repo_path}` — e.g., `apcore/` → `core`, `apcore-mcp/` → `mcp`). `symbol` is `ClassName.method_name` in canonical snake_case.
+3. Store as `spec_contracts[scope][symbol]` per `shared/contract-spec.md` §Canonical Storage Shape. Use the component associated with the discovered `spec_root` for `scope` (e.g. `core` or `mcp`). `symbol` is `ClassName.method_name` in canonical snake_case.
 
 If {doc_repo_path} is empty OR no Contract blocks found, enter cross-repo-only mode (compare repos
 against each other without spec authority — any divergence is still a bug).
@@ -826,7 +826,7 @@ For each integration repo, verify it USES the core SDK according to the core SDK
 1. Find every call site into the core SDK:
    - Python integrations: grep for `from apcore import` / `import apcore.`; then find every method call on imported symbols (`Registry(...)`, `Executor(...).execute(...)`, `Context(...)`, etc.)
    - TypeScript integrations: grep for `from "apcore-js"` / `from "apcore"`; find every method call
-   - Go integrations: grep for `"github.com/aipartnerup/apcore-go"` imports; find every call
+   - Go integrations: read the Core module path from the resolved Go SDK's `go.mod` and check the integration's module dependencies and imports for call sites.
    - Rust integrations: (a) parse `Cargo.toml` `[dependencies]` for any crate named `apcore` or matching `apcore-*` — this is the ground truth for which crates are in use; (b) grep source for `use apcore`, `use apcore_`, `apcore::`, `apcore_[a-z]+::` to find the call sites; (c) also check any project-specific prelude module (typically `src/prelude.rs` or re-exports in `lib.rs`) for pub-use chains that hide direct `apcore::` references. A workspace or prelude re-export still counts as a call site.
 
 2. For each call site, extract:

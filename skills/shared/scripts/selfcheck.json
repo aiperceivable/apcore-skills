@@ -40,11 +40,11 @@
     }
   },
   "tag_covers": {
-    "sync-extract-v3": {
-      "_why": "Step 2's cache is keyed partly by this tag. Editing the prompt without bumping serves entries built under a different output schema.",
+    "sync-extract-v4": {
+      "_why": "Step 2 binds extraction to the canonical package and spec paths. Bump the tag when either extraction prompt changes.",
       "files": {
-        "skills/sync/references/extract-api-prompt.md": "0423630dc359b306",
-        "skills/shared/api-extraction-protocol.md": "908e43498923b61c"
+        "skills/sync/references/extract-api-prompt.md": "24ee5f48121905bd",
+        "skills/shared/api-extraction-protocol.md": "eb130f0089b68432"
       }
     },
     "sync-deepchain-v2": {

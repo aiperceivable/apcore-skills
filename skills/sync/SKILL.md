@@ -10,9 +10,9 @@ description: >
   PROTOCOL_SPEC, README, examples, tests) is internally consistent and free of contradictions.
   Includes cross-language example scenario coverage and test scenario coverage comparison.
   Optionally hands off behavioral equivalence to the `tester` skill.
-  Covers both apcore core SDKs and apcore-mcp bridges.
+  Covers Core SDKs and Surface packages.
 instructions: >
-  The documentation repos (apcore/, apcore-mcp/) are the single source of truth.
+  Each target's discovered spec_root is its specification authority.
   Phase A MUST complete before Phase B begins — Phase B uses Phase A's verified
   API surface as its reference. Never skip a phase. Never skip a checklist item.
   Internal consistency is checked at the SKELETON level (algorithm checkpoint
@@ -133,21 +133,18 @@ Positional repo names control **exactly** which repos are included. They take pr
 ```
 /apcore-skills:sync apcore,apcore-typescript,apcore-python
 ```
-Syncs exactly these 3 repos — no expansion, no auto-discovery. The doc repo and impl repos are determined from the provided list:
-- If a `protocol` repo (e.g., `apcore`) is in the list → it becomes `doc_repo` for core scope
-- If a `docs-site` repo (e.g., `apcore-mcp`) is in the list → it becomes `doc_repo` for mcp scope
-- If no doc repo is in the list → auto-include the relevant doc repo based on the impl repos' scope group (a `core-sdk` repo implies `apcore/` as doc repo; a `mcp-bridge` repo implies `apcore-mcp/` as doc repo)
-- All remaining repos become `impl_repos`
+Syncs exactly the named implementations. Resolve each name from `repos[]`. Group
+the implementations by `spec_root` and include their matching documentation
+targets when omitted. An explicitly listed documentation target also receives
+the documentation pass.
 
 **Single repo name — smart expansion:**
 ```
 /apcore-skills:sync apcore
 ```
 A single repo name triggers **smart expansion** based on the repo's type:
-- `protocol` repo (`apcore`) → expand to `apcore` + **all discovered `core-sdk` repos** (`apcore-{lang}`). Does NOT include `mcp-bridge` repos.
-- `docs-site` repo (`apcore-mcp`) → expand to `apcore-mcp` + **all discovered `mcp-bridge` repos** (`apcore-mcp-{lang}`)
-- `core-sdk` repo (`apcore-python`) → expand to this repo + its `doc_repo` (`apcore`). Only this single impl repo, not all core SDKs.
-- `mcp-bridge` repo (`apcore-mcp-python`) → expand to this repo + its `doc_repo` (`apcore-mcp`). Only this single impl repo.
+- A Core protocol or Surface documentation target → include that target and all discovered implementations sharing its `spec_root`.
+- A Core SDK or Surface package → include that package and its documentation target.
 - `integration` repo → Phase A N/A, Phase B only on this repo
 - `shared-lib` or `tooling` repo → Phase B only on this repo
 
@@ -157,12 +154,12 @@ Display: `"Scope: {repo-names} (from positional args)"`
 
 ## Documentation and Implementation Repo Mapping
 
-Each `--scope` group has one **documentation repo** (single source of truth) and one or more **implementation repos** (language-specific code):
+Each component has one specification root and one or more language packages:
 
 | Scope | Documentation Repo | Contents | Implementation Repos |
 |-------|-------------------|----------|---------------------|
-| `core` | `apcore/` | PROTOCOL_SPEC.md, PRD, SRS, Tech Design, Test Plan, Feature Specs | `apcore-python/`, `apcore-typescript/`, ... |
-| `mcp` | `apcore-mcp/` | PRD, SRS, Tech Design, Test Plan, Feature Specs | `apcore-mcp-python/`, `apcore-mcp-typescript/`, ... |
+| `core` | `apcore/` | Protocol spec and feature specs | `apcore/<lang>/` |
+| `mcp`, `a2a`, `cli`, `toolkit` | `apcore-surfaces/<component>/` | Component specs | `apcore-surfaces/<component>/<lang>/` |
 
 Implementation repos contain only code and a README. They do NOT contain PRD/SRS/Tech Design/Test Plan/Feature Specs — those live exclusively in the documentation repo.
 
@@ -199,7 +196,7 @@ Parallelism fan-out:
 | P3 unit | Step 2 = one per repo · Step 4C = one per module · Step 6 = one per repo |
 | P4 concurrency | Step 2 batches of 3 (2.1) · Step 4C batches of 5 (4C.2.1) |
 | P5 abort | Persist via `extract_cache.py put` (2.2 / 4C.2.2) before aborting, so a re-run resumes from cache |
-| P7 receipts | 2.1a — extraction to `.apcore-skills-cache/sync/api/{repo}.extraction.md`, reply < 1 KB |
+| P7 receipts | 2.1a — extraction to `.apcore-skills-cache/sync/api/v4/{repo}.extraction.md`, reply < 1 KB |
 | P8 stdout | 2.0 — `extract_cache.py check --out-file` is **mandatory** |
 
 **Extraction cache (Step 2, Step 4C).** On a repeat sync where most repos/modules haven't changed since the last run, this is the dominant lever for reducing sub-agent count — a re-run of an ecosystem-scale sync (many repos × many modules) can skip the large majority of Step 2/4C sub-agent calls entirely while producing byte-identical results for the unchanged portions. It is lossless (content-hash keyed, `shared/ecosystem.md` §0.6b) and ON by default; pass `--no-cache` only to force a full re-run. This does not reduce what Step 4/4A/4B/6 evaluate — every symbol and module still gets a checklist row and a finding decision, whether the underlying extraction came from a fresh sub-agent or a cache hit.
@@ -254,12 +251,10 @@ Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
 **Only applies when NO positional repos are provided.**
 
 **If `--scope` is NOT specified:**
-1. Detect the current working directory's repo name (basename of CWD, e.g., `apcore-python`)
-2. Look up this repo in the discovered ecosystem:
-   - If it's a `core-sdk` repo → set scope to `core`, filter `impl_repos` to **only this repo**
-   - If it's a `mcp-bridge` repo → set scope to `mcp`, filter `impl_repos` to **only this repo**
-   - If it's the `protocol` repo (`apcore/`) → set scope to `core`, include **all** core impl repos (user is editing the spec, so check all implementations against it)
-   - If it's a `docs-site` repo (`apcore-mcp/`) → set scope to `mcp`, include **all** mcp impl repos
+1. Use Step 0's `cwd_repo` and resolve `cwd_repo.name` in `repos[]`.
+2. Apply the same expansion as a single positional target:
+   - Core SDK or Surface package → include this package and its specification.
+   - Core protocol or Surface documentation target → include all packages sharing its specification.
    - If it's an `integration` repo → Phase A is N/A (integrations don't have a protocol spec to compare against), run Phase B only on this repo
    - If it's a `shared-lib` or `tooling` repo → run Phase B only on this repo (no spec to compare against)
    - If CWD is not inside any discovered repo → use `AskUserQuestion` to ask: "CWD is not an apcore repo. Which repo do you want to sync?" with options from `repos[]` names + "All repos (full ecosystem scan)"
@@ -269,9 +264,9 @@ Parse `$ARGUMENTS` for all flags and positional repo names. Determine:
 
 #### 1.2 Resolve Repos
 
-For each scope group, resolve:
-- `doc_repo` — the documentation repo path (e.g., `apcore/` for core, `apcore-mcp/` for mcp)
-- `impl_repos[]` — the implementation repo paths (may be a single repo if CWD-scoped)
+For each component, resolve `doc_repo` from the package's `spec_root` and
+`impl_repos[]` from the selected records' `path` values. Report a missing
+specification for that component and use the applicable implementation-only checks.
 
 **Single-SDK handling:** If a scope group contains fewer than 2 implementation repos:
 - Skip cross-implementation comparison for that group
@@ -301,15 +296,14 @@ Verify that the documentation repo's feature specs and protocol spec match what 
 ```
 python3 <scripts_dir>/extract_cache.py check --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
     --kind api --key {repo_name} --repo-dir {repo_path} --lang {language} \
-    --extra "sync-extract-v3" \
-    --out-file {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+    --extra "sync-extract-v4" --extra "{repo_path}" --extra "{doc_repo or '(none)'}" \
+    --out-file {ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo_name}.extraction.md
 ```
 
 **Tag history.**
 - `v2` superseded `v1`: the output gained the mandatory `FILE_MAP` section, which Step 4C.1 depends on.
 - `v3` supersedes `v2`: each method's `contract` gained **`errors_propagated`** and **`propagation_truncated`** (`api-extraction-protocol.md` E.4b). A `v2` entry has neither field, while Step 4B and audit D10 now compare them — served as a hit, every symbol would read as "nothing propagated" rather than "not extracted", turning a missing field into a false agreement.
-
-The bump is what forces re-extraction instead of serving structurally-valid-but-incomplete hits — 2.0's hit path does not validate individual fields. **This one costs a full re-extraction** (~1.07 M tokens for the three core SDKs, measured). That is the honest price of the schema change; serving `v2` data into a `v3` comparison would be caching "probably fine", which §0.6b explicitly rules out.
+- `v4` binds the extraction to the resolved package path and specification root. It also moves the exported extraction files under `api/v4/` so direct consumers only see results generated under this protocol.
 
 **Before the first `check`/`put` call of the run:** if `{ecosystem_root}` is (or is inside) a git repo and its `.gitignore` does not already contain `.apcore-skills-cache/` (or a pattern that covers it, e.g. `.apcore-skills-cache`), append that line. Do this once per run, not once per repo — it is the actual point the cache directory gets created, so this is where the ecosystem.md §0.6b guidance must be executed, not just documented.
 
@@ -338,11 +332,12 @@ number of splits while the extracted surface stays the same.
 **A repo too large for one pass is handled INSIDE the sub-agent, by writing to disk
 rather than by cloning the sub-agent.** See 2.1a.
 
-**2.1a Extraction output goes to a file, not into the reply.** Each sub-agent writes
-its full extraction to:
+**2.1a Extraction output goes to a file, not into the reply.** Create the
+output's parent directory before dispatch. Each sub-agent writes its full
+extraction to:
 
 ```
-{ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+{ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo_name}.extraction.md
 ```
 
 and returns **only a receipt** — the `EXTRACTION_VERIFICATION` block, the output
@@ -368,8 +363,9 @@ the sub-agent choose which rule to break.
 The sub-agent may append to that file incrementally as it walks the module tree, so
 its own context never has to hold the whole extraction either.
 
-**Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`,
-filling in `{repo_path}`, `{package}`, and `{output_path}` for each repo.
+**Sub-agent prompt:** Use the template from `@references/extract-api-prompt.md`.
+Fill in `{repo_path}` and `{doc_repo}` from the target's `path` and `spec_root`,
+along with `{package}` and `{output_path}`.
 
 **2.1b Downstream reads the file, in slices.** Steps 3/4/4A/4B read
 `api_summaries[repo_name]` as a **path**, not as inline content. When comparing, read
@@ -381,7 +377,7 @@ into main context at once — that reintroduces the same ceiling one layer up.
 
 ```
 python3 <scripts_dir>/extract_cache.py put --cache-dir {ecosystem_root}/.apcore-skills-cache/sync \
-    --kind api --key {repo_name} --hash {hash_from_2.0} --data-file {ecosystem_root}/.apcore-skills-cache/sync/api/{repo_name}.extraction.md
+    --kind api --key {repo_name} --hash {hash_from_2.0} --data-file {ecosystem_root}/.apcore-skills-cache/sync/api/v4/{repo_name}.extraction.md
 ```
 
 If a repo's extraction triggered any coverage WARNING, do NOT `put` it — leave the cache entry as-is (miss again next run, giving the repo another independent attempt to reach full coverage rather than freezing a partial result). This mirrors 4C.2.2's "never cache a `failed` module" rule.
@@ -483,7 +479,7 @@ Step 3 leaves in context.**
 3. `## Contract:` blocks are **not** parsed here — only indexed (3.1). Step 4's per-module loop parses each block per `shared/contract-spec.md` into `{inputs[], preconditions[], side_effects[], postconditions[], errors[], returns, properties{}}` when it slices that module, and discards it after. Holding all 140 parsed contracts at once is ~250 KB and defeats the point of the index.
 4. If `{doc_repo_path}/docs/spec/type-mapping.md` exists — load cross-language type mappings (small, load fully)
 
-**For `apcore-mcp/` (mcp scope):**
+**For a Surface specification root (e.g. `apcore-surfaces/mcp/`):**
 1. Scan `{doc_repo_path}/docs/features/*.md` — extract per-feature API definitions, `## Algorithm` checkpoint sections, **and `## Contract:` behavioral contract sections**
 2. If `{doc_repo_path}/docs/tech-design.md` exists — extract internal interface contracts
 3. If a protocol or spec file exists — extract the API contract
@@ -1006,7 +1002,7 @@ It verifies two things:
 
 Spawn sub-agents in parallel: **one per documentation repo** + **one per implementation repo**, all simultaneously.
 
-#### Sub-agent for Documentation Repo (apcore/ or apcore-mcp/)
+#### Sub-agent for a Resolved Documentation Target
 
 **Sub-agent prompt:** Use the template from `@references/audit-doc-repo-prompt.md`, filling in `{doc_repo_path}`, injecting `{verified_api}` from Step 4.4, and `{deprecated_api}` from Step 3.
 

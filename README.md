@@ -26,7 +26,7 @@ and a consumer did not** (six such defects in one refactor, see
 benefit nobody here collects.
 
 What still applies, and is not compatibility:
-- **Cache version tags** (`sync-extract-v3`, `sync-deepchain-v2`) — these invalidate stale
+- **Cache version tags** (`sync-extract-v4`, `sync-deepchain-v2`) — these invalidate stale
   *data*, not old *commands*. Bumping one is how a schema change stays honest; it is
   enforced mechanically by `selfcheck.py`'s `tag-covers` check.
 - **Deprecation notices in the user's own SDKs** — those have downstream consumers. This
@@ -38,56 +38,36 @@ What still applies, and is not compatibility:
 |---------|-------|-------------|
 | `/apcore-skills` | | Ecosystem dashboard — versions, git status, health, all commands |
 | `/apcore-skills:sync` | `[repos...] [--skip-docs] [--fix] [--scope core\|mcp\|integrations\|all] [--lang python,typescript,...] [--internal-check none\|contract\|skeleton\|behavior] [--deep-chain on\|off] [--modules mod1,mod2,...] [--no-cache] [--save]` | Cross-language API + **contract/intent** + **call-chain (deep-chain)** + documentation consistency check & fix |
-| `/apcore-skills:sdk` | `<language> [--type core\|mcp] [--ref <existing-sdk>]` | Bootstrap a new language SDK from reference |
+| `/apcore-skills:sdk` | `<language> [--type core\|mcp\|a2a\|cli\|toolkit] [--ref <existing-sdk>]` | Bootstrap a language package in its monorepo |
 | `/apcore-skills:integration` | `<framework> [--lang python\|typescript\|go] [--ref <existing-integration>]` | Bootstrap a new framework integration |
-| `/apcore-skills:audit` | `[--scope core\|mcp\|integrations\|all] [--fix] [--deep-chain on\|off] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
+| `/apcore-skills:audit` | `[--repo <target-id> \| --scope core\|mcp\|integrations\|all] [--fix] [--deep-chain on\|off] [--strict] [--save report.md]` | Deep cross-repo consistency audit — 11 dimensions including **D10 Contract Parity** (shape-level intent) and **D11 Deep-Chain Parity** (chain-level intent — cross-language call-graph diff). Emits review-compatible output consumable by `/code-forge:fix --review`. |
 | `/apcore-skills:tester` | `[<repos...>] [--spec <feature>] [--mode generate\|run\|full] [--category unit\|integration\|boundary\|protocol\|contract\|conformance\|all] [--save report.md]` | Spec-driven test generation & cross-language behavioral verification (incl. Contract-derived tests and shared conformance fixtures) |
 | `/apcore-skills:release` | `<version> [--scope core\|mcp\|integrations\|all] [--dry-run]` | Coordinated multi-repo release pipeline |
 
 ## Ecosystem
 
-The apcore ecosystem consists of:
+Core and Surface implementations live in two Git checkouts. Each component
+currently ships Python, Rust, and TypeScript packages.
 
-**Core Protocol:**
-- `apcore` — Protocol specification and documentation
+| Component | Specification target | Package paths | Package target IDs |
+|---|---|---|---|
+| Core | `apcore` | `apcore/<lang>/` | `apcore-<lang>` |
+| MCP | `apcore-mcp` | `apcore-surfaces/mcp/<lang>/` | `apcore-mcp-<lang>` |
+| A2A | `apcore-a2a` | `apcore-surfaces/a2a/<lang>/` | `apcore-a2a-<lang>` |
+| CLI | `apcore-cli` | `apcore-surfaces/cli/<lang>/` | `apcore-cli-<lang>` |
+| Toolkit | `apcore-toolkit` | `apcore-surfaces/toolkit/<lang>/` | `apcore-toolkit-<lang>` |
 
-**Core SDKs (must stay in sync):**
-- `apcore-python` — Python SDK
-- `apcore-typescript` — TypeScript SDK (npm: `apcore-js`)
-- `apcore-rust` — Rust SDK
-
-**MCP Bridges (must stay in sync):**
-- `apcore-mcp-python` — Python MCP server
-- `apcore-mcp-typescript` — TypeScript MCP server (npm: `apcore-mcp`)
-- `apcore-mcp-rust` — Rust MCP server
-
-**A2A Bridges:**
-- `apcore-a2a-python` — Python A2A bridge
-- `apcore-a2a-typescript` — TypeScript A2A bridge
-
-**Toolkit:**
-- `apcore-toolkit-python` — Python toolkit
-- `apcore-toolkit-typescript` — TypeScript toolkit
-
-**CLI:**
-- `apcore-cli` — Command-line interface
-
-**Framework Integrations:**
-- `django-apcore` — Django integration
-- `flask-apcore` — Flask integration
-- `nestjs-apcore` — NestJS integration
-- `tiptap-apcore` — TipTap editor integration
-
-**Shared Libraries:**
-- `apcore-discovery-python` — Shared discovery utilities
+Here `<lang>` is `python`, `rust`, or `typescript`. Framework integrations such as
+`django-apcore` and shared libraries such as `apcore-discovery-python` may live in
+independent sibling checkouts.
 
 ## Prerequisites
 
-1. All apcore ecosystem repos should be in a common parent directory (e.g., `~/WorkSpace/aipartnerup/`)
-2. The `apcore/` protocol repo with `PROTOCOL_SPEC.md` is required for `sync`, `sdk`, and `tester` (core-sdk target) commands
-3. Spec repos per project type: `apcore-mcp/` (MCP bridges), `apcore-a2a/` (A2A bridges), `apcore-cli/` (CLI), `apcore-toolkit/` (toolkit)
-4. No config file needed — ecosystem discovery is automatic based on directory naming conventions
-5. Optional: `.apcore-skills.json` in the ecosystem root to customize discovery and version groups
+1. Keep the checkouts in a common parent directory. Either monorepo can be discovered on its own.
+2. Use `apcore/PROTOCOL_SPEC.md` for Core workflows. Surface specifications and fixtures live under `apcore-surfaces/<component>/`.
+3. Discovery walks up from CWD and identifies packages by their monorepo paths and build files.
+4. From a separate directory, set `ecosystem_root` in `.apcore-skills.json` there or pass `--root` to `discover.py`.
+5. Use the optional ecosystem-level `.apcore-skills.json` for reference and version group configuration.
 6. **[code-forge](https://github.com/tercel/code-forge)** skill required for `sdk` and `integration` commands (generates `.code-forge.json` and uses `code-forge:port`, `code-forge:plan`, `code-forge:impl`)
 
 ## Breaking Changes (v0.10+)
@@ -114,7 +94,7 @@ The ecosystem enforces consistency at three distinct layers — each layer has a
 | **L2.5 Intent / Call-Chain (CHAIN)** | Which internal calls each public method makes, in what order, producing which state mutations. Catches "signatures match + declared contract matches, but internal call graph diverges" — e.g., one language's public method silently skips a validation call peers perform, or lacks a null-guard peers have | Helper decomposition, exact control-flow shape | **sync Step 4C** (deep-chain — default on) + **audit D11** (Deep-Chain Parity) |
 | **L3 Public Signature** | Class/function names (with language convention), parameter names/types, return types, trait/interface contracts, multi-constructor coverage | Internal type choices, private helpers | **sync Step 4** (Phase A checklist) + **audit D1** (API Surface) |
 
-Feature specs in doc repos (`apcore/`, `apcore-mcp/`) declare L2 contracts in `## Contract: ClassName.method` blocks. See `skills/shared/contract-spec.md` for the authoritative format. audit D4 flags any public symbol whose feature spec lacks a Contract block.
+Feature specs at the discovered specification root declare L2 contracts in `## Contract: ClassName.method` blocks. See `skills/shared/contract-spec.md` for the format. Audit D4 flags public symbols whose feature specifications lack a Contract block.
 
 When sync or audit detects an L2 divergence, its review-compatible output (`# Project Review:`) can be piped directly to `/code-forge:fix --review` for automated patching.
 

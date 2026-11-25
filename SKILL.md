@@ -177,21 +177,15 @@ only pushes after explicit user approval.
 
 ## Ecosystem Assumptions
 
-Expected layout is a common parent directory containing apcore ecosystem repos,
-for example:
+The ecosystem root is the common parent directory of these checkouts:
 
-- `apcore/`
-- `apcore-python/`
-- `apcore-typescript/`
-- `apcore-rust/`
-- `apcore-mcp-python/`
-- `apcore-mcp-typescript/`
-- `django-apcore/`
-- `flask-apcore/`
-- `nestjs-apcore/`
+- `apcore/` contains the Core specification and its language packages.
+- `apcore-surfaces/` contains MCP, A2A, CLI, and Toolkit components with shared specifications and language packages.
+- Independently maintained framework integrations, such as `django-apcore/` and `flask-apcore/`, are sibling checkouts.
 
-Discovery is automatic based on naming conventions and can be customized with
-`.apcore-skills.json` in the ecosystem root.
+Discovery walks upward from the working directory and resolves targets by path.
+From a separate workspace, pass `--root` to discovery or set `ecosystem_root` in
+`.apcore-skills.json` in the working directory.
 
 ## Output Locations
 

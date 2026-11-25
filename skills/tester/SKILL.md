@@ -41,7 +41,7 @@ Spec-driven test generation and cross-language behavioral verification.
 
 **tester-specific bindings:**
 
-- **P2 ceiling: 3 x repos.** Flags that reduce it: `--repos`, `--category`
+- **P2 ceiling: 3 x repos.** Limit the selected targets with positional target IDs or narrow the tests with `--category`.
 - **P1/P3 plan:** Step 2 = one per target repo (generation) - Step 3 = one per repo (execution) - Step 4 = one per repo (verification). The three passes are sequential, so at most `repos` are ever in flight.
 - **P5:** a 429 aborts this run; persist finished units first, then report how to resume. This skill previously had **no** rate-limit handling.
 
@@ -91,7 +91,7 @@ Spec-driven test generation and cross-language behavioral verification.
 | `boundary` | Edge cases, error paths, limits | Empty/null/max inputs; concurrency |
 | `protocol` | Cross-language behavioral equivalence via per-SDK unit tests with same clause IDs | clause-ID tagging |
 | **`contract`** | **Each `## Contract:` block → one test per input validation rule (assert correct error+code is raised), one per declared error (assert code), one per `### Properties` true value (assert async / thread-safe / idempotent / reentrant), one per `### Side Effects` (assert observable effects in order)** | **`## Contract:` blocks in feature specs (per `shared/contract-spec.md`)** |
-| **`conformance`** | **Shared input/output fixtures run identically across every SDK — the authoritative cross-language equivalence signal** | **`{doc_repo}/tests/conformance/**/*.yaml` (per `shared/conformance-fixtures.md`)** |
+| **`conformance`** | **Shared input/output fixtures run identically across every SDK — the authoritative cross-language equivalence signal** | **`repos[].conformance_path` (see `shared/conformance-fixtures.md`)** |
 
 ## Context Management
 
@@ -123,40 +123,30 @@ Step 0 (ecosystem) → Step 1 (parse args + load specs + load Contracts + load c
 **If no positional repos specified:**
 1. Detect CWD repo from `cwd_repo` (Step 0)
 2. Scope by CWD repo type:
-   - `core-sdk` repo → test only this repo (spec: `apcore`)
-   - `mcp-bridge` repo → test only this repo (spec: `apcore-mcp`)
-   - `a2a-bridge` repo → test only this repo (spec: `apcore-a2a`)
-   - `toolkit` repo → test only this repo (spec: `apcore-toolkit`)
-   - `protocol` repo (`apcore`) → test ALL core-sdk repos
-   - `docs-site` repo (`apcore-mcp`) → test ALL mcp-bridge repos
-   - `docs-site` repo (`apcore-a2a`) → test ALL a2a-bridge repos
-   - `integration` repo → test only this repo (spec: self)
-   - Any other recognized type (e.g., `cli`, `tooling`, `shared-lib`) → test only this repo (spec: self — uses own docs/)
+   - Core SDK or Surface package → test only this package.
+   - Core protocol or Surface documentation target → test the implementations that share its `spec_root`.
+   - Integration or other independent implementation → test only this target and use its own documentation.
    - CWD not an apcore repo → use `AskUserQuestion` to ask which repos to test
 3. Display: "Test scope: {repo-names} (from CWD). Specify repos explicitly for different scope."
 
 #### 1.2 Resolve Spec Source for Target Repos
 
-Each project type has its own authoritative spec location. Determine the **spec repo** and **spec files** for each target repo based on its type.
+Resolve each target ID in `repos[]`. Use `path` for source and test commands.
+Use `spec_root` for normative documents, or the target's own `path` for an
+independent project. A monorepo package with a missing `spec_root` yields
+`SPEC_MISSING`. Use the resolved directory for all spec reads and evidence.
 
-**Spec Source Resolution Table:**
+| Target Type | Spec Files (search in order, relative to the resolved spec root) |
+|---|---|
+| `core-sdk` | `PROTOCOL_SPEC.md`, `docs/features/*.md` |
+| `mcp-bridge` | `docs/srs-apcore-mcp.md`, `docs/tech-design-apcore-mcp.md`, `docs/features/*.md`, `docs/examples-spec.md` |
+| `a2a-bridge` | `docs/spec/*.md`, `docs/features/*.md` |
+| `toolkit` | `docs/features/*.md` and the component's normative requirements and design docs |
+| `cli` | `docs/srs.md`, `docs/tech-design.md`, `docs/features/*.md` |
+| Other independent targets | `docs/features/*.md`, then project-specific docs |
 
-| Target Repo Type | Spec Repo | Spec Files (search in order) |
-|---|---|---|
-| `core-sdk` (`apcore-python`, `apcore-typescript`, `apcore-rust`) | `apcore` | 1. `PROTOCOL_SPEC.md` (primary) 2. `docs/features/*.md` (per-feature) |
-| `mcp-bridge` (`apcore-mcp-python`, `apcore-mcp-typescript`, `apcore-mcp-rust`) | `apcore-mcp` | 1. `docs/srs-apcore-mcp.md` (primary) 2. `docs/tech-design-apcore-mcp.md` (architecture) 3. `docs/examples-spec.md` (examples) |
-| `a2a-bridge` (`apcore-a2a-python`, `apcore-a2a-typescript`) | `apcore-a2a` | 1. `docs/spec/*.md` (protocol spec) 2. `docs/features/*.md` (per-feature) |
-| `toolkit` (`apcore-toolkit-python`, `apcore-toolkit-typescript`) | `apcore-toolkit` | 1. `docs/features/*.md` (per-feature) |
-| `cli` (`apcore-cli`) | `apcore-cli` | 1. `docs/srs.md` (primary) 2. `docs/tech-design.md` (architecture) 3. `docs/features/*.md` (per-feature) |
-| `integration` (`django-apcore`, `flask-apcore`, etc.) | self (each integration is its own spec) | 1. `docs/features/*.md` (if present) 2. `docs/{name}/*.md` (project docs) |
-
-**Resolution steps:**
-
-1. For each target repo, look up its type from `repos[]` (discovered in Step 0)
-2. Map type → spec repo using the table above
-3. Verify spec repo exists at `{ecosystem_root}/{spec_repo_name}/`
-4. Scan for spec files in the listed order; collect all found files
-5. If NO spec files found for a target repo: report as `SPEC_MISSING` warning and skip test generation for that repo (cannot generate tests without a spec)
+If no applicable spec files exist, emit `SPEC_MISSING` and skip clause generation
+for that target. Existing tests and conformance can still run.
 
 **If `--spec` is specified:** filter to only feature specs matching the name (e.g., `--spec executor` → only `docs/features/*executor*.md` or SRS sections about executor).
 
@@ -164,10 +154,10 @@ Display:
 ```
 Spec sources resolved:
   apcore-python         → apcore/PROTOCOL_SPEC.md + 10 feature specs
-  apcore-mcp-python     → apcore-mcp/docs/srs-apcore-mcp.md + tech-design
-  apcore-a2a-python     → apcore-a2a/docs/spec/ + 10 feature specs
-  apcore-toolkit-python → apcore-toolkit/docs/features/ (6 specs)
-  apcore-cli            → apcore-cli/docs/srs.md + tech-design + 9 feature specs
+  apcore-mcp-python     → apcore-surfaces/mcp/docs/srs-apcore-mcp.md + tech-design
+  apcore-a2a-python     → apcore-surfaces/a2a/docs/spec/ + 10 feature specs
+  apcore-toolkit-python → apcore-surfaces/toolkit/docs/features/ (6 specs)
+  apcore-cli-python     → apcore-surfaces/cli/docs/srs.md + tech-design + 9 feature specs
 ```
 
 #### 1.3 Extract Testable Clauses from Specs
@@ -251,27 +241,20 @@ If a feature spec defines a public method but has **no `## Contract:` block**, D
 
 #### 1.4 Load Shared Conformance Fixtures
 
-Scan each scope's doc repo for `tests/conformance/**/*.yaml`:
-- core scope: `apcore/tests/conformance/`
-- mcp scope: `apcore-mcp/tests/conformance/`
-- a2a scope: `apcore-a2a/tests/conformance/`
-- toolkit scope: `apcore-toolkit/tests/conformance/`
+For each selected package, use its discovered `conformance_path`. Index each
+unique suite once and associate it with the packages that share that path. Read
+the suite's `README.md` and fixture schema when present, then inventory its JSON fixtures under
+`fixtures/`. Use the suite's documented case layout and existing test drivers.
+Only run YAML inputs when an existing driver uses them as test data.
 
-For each fixture file found:
-1. Parse per `shared/conformance-fixtures.md`. Extract `method`, `contract_ref`, `setup`, `cases[]`, `properties_check`.
-2. Cross-check fixture coverage against the referenced Contract block:
-   - Every `### Inputs` validation with `reject_with` must have at least one matching case → else WARNING `"fixture {F} does not cover input rule {rule} from Contract"`.
-   - Every `### Errors` entry must have at least one case → else WARNING.
-   - Every `### Properties` true value must have a corresponding case (concurrency for `thread_safe`, repeat-call for `idempotent`, etc.) → else WARNING.
-3. Store as `conformance_fixtures[method] = fixture_obj`.
-
-If no fixtures found, emit INFO finding `"no conformance fixtures in {doc_repo}/tests/conformance/ — cross-language equivalence will be checked only via per-language clause tests (lower fidelity). Create fixtures per shared/conformance-fixtures.md."`
-
-Missing fixtures do not fail the run. They only reduce the confidence of the "protocol" and "conformance" categories.
+Cross-check fixture coverage against a Contract block when a source links the
+fixture to that block. Record missing checks against the actual fixture path.
+Report an absent suite as `NO_FIXTURES` for the affected target. A null path is
+expected for independent integrations without a shared suite.
 
 #### 1.5 Build Test Matrix
 
-Cross `spec_clauses[]` × `target_repos[]` × `categories[]`, plus conformance fixtures × target_repos[]:
+Cross clauses with the selected implementations for their spec root and category. Cross each conformance suite only with its associated packages:
 
 ```
 Test Matrix:
@@ -285,14 +268,14 @@ Test Matrix:
   Repos: {repo-names}
   Categories: {selected categories}
   Total test cases to generate: {clauses × repos}
-  Total conformance cases to run: {cases × repos}
+  Total conformance cases to run: {sum of cases across the corresponding packages}
 ```
 
 ---
 
 ### Step 2: Generate Tests (Sub-agents)
 
-**Skip if `--mode run`.**
+**Skip if `--mode run` or `--category conformance`.**
 
 Spawn **one sub-agent per target repo**, all in parallel. Each sub-agent generates all test files for its assigned repo.
 
@@ -406,7 +389,7 @@ Clause coverage:
 
 ### Step 3: Run Tests (Sub-agents)
 
-**Skip if `--mode generate`.**
+**Skip if `--mode generate` or `--category conformance`.**
 
 Spawn **one sub-agent per target repo**, all in parallel.
 
@@ -419,9 +402,10 @@ Run the full test suite for {repo_path}.
 Language: {language}
 Test command: {test_command}
   Python: cd {repo_path} && python -m pytest tests/ -v --tb=short 2>&1
-  TypeScript: cd {repo_path} && npx vitest run --reporter=verbose 2>&1
+  TypeScript: use the package's test command and package manager. For the
+              monorepo Vitest packages, use pnpm with the CI setup.
   Go: cd {repo_path} && go test -v -count=1 ./... 2>&1
-  Rust: cd {repo_path} && cargo test -- --nocapture 2>&1
+  Rust: run cargo test with the package or checkout's configured options.
 
 Capture:
 1. Full test output (stdout + stderr)
@@ -474,57 +458,24 @@ Report each placeholder under `PLACEHOLDERS` and exclude it from `PASSED`. A cla
 
 ### Step 3.5: Run Shared Conformance Fixtures (Sub-agents)
 
-**Skip if** `--category` excludes `conformance` AND `all`, OR no fixtures loaded in Step 1.4.
+**Run in `run` or `full` mode when the category is `conformance` or `all`.**
 
-Spawn **one sub-agent per target repo**, all in parallel.
+Spawn one sub-agent per selected package with fixtures. Give it `path`,
+`git_root`, `conformance_path`, and the fixture inventory. Use the entry point
+in the package's tests or CI as described in `shared/conformance-fixtures.md`.
+Reuse Step 3 output only when it includes the same fixture-driven tests under
+the required setup. Return the executed command, suite status and test counts,
+and per-case results with fixture path, case ID, native test evidence and
+assertion failure details. An existing adapter that emits `CONFORMANCE_CASE`
+blocks can supply per-case results using the same fields.
 
-#### Sub-agent: Run Conformance Runner for {repo}
+Distinguish `COMPLETED`, `NO_FIXTURES`, `NO_RUNNER` and `RUNNER_ERROR` at suite
+level. Preserve failed tests and partial output. Mark cases without evidence of
+execution `UNVERIFIED`. A suite exit of zero alone is insufficient to populate
+`PASS` in a case row.
 
-**Prompt:**
-```
-Run the conformance-fixture runner for {repo_path}.
-
-Runner location (detect which exists):
-  Python:     {repo_path}/tests/conformance_runner.py
-  TypeScript: {repo_path}/tests/conformance_runner.ts
-  Go:         {repo_path}/tests/conformance_runner.go
-  Rust:       {repo_path}/tests/conformance_runner.rs
-
-Fixture location: {doc_repo_path}/tests/conformance/
-
-Invocation:
-  Python:     cd {repo_path} && python tests/conformance_runner.py --fixtures {doc_repo_path}/tests/conformance/ 2>&1
-  TypeScript: cd {repo_path} && npx tsx tests/conformance_runner.ts --fixtures {doc_repo_path}/tests/conformance/ 2>&1
-  Go:         cd {repo_path} && go run ./tests/conformance_runner.go --fixtures {doc_repo_path}/tests/conformance/ 2>&1
-  Rust:       cd {repo_path} && cargo run --bin conformance_runner -- --fixtures {doc_repo_path}/tests/conformance/ 2>&1
-
-Parse CONFORMANCE_CASE blocks from output per shared/conformance-fixtures.md format.
-
-Error handling:
-- If runner does not exist: report STATUS: NO_RUNNER with detail "Repo {R} has no conformance_runner.{ext}. Bootstrap one by copying the pattern from the reference SDK and implementing the setup/call/reset/... primitives."
-- If runner crashes: report STATUS: RUNNER_ERROR with full stderr
-- If runner reports UNSUPPORTED for an op: pass the case's UNSUPPORTED through — it's a runner-completeness gap, not a test failure
-- Capture ALL cases even on first failure (do not stop at first fail)
-
-Return:
-REPO: {repo-name}
-STATUS: {completed|no_runner|runner_error}
-TOTAL_CASES: {N}
-PASS: {N}
-FAIL: {N}
-SKIPPED: {N}
-UNSUPPORTED: {N}
-ERROR: {N}
-CASES:
-- file: {relative path}
-  method: {Class.method}
-  case_id: {id}
-  status: PASS|FAIL|SKIPPED|UNSUPPORTED|ERROR
-  details: {as emitted by runner}
-  duration_ms: {int}
-```
-
-Wait for all runners to complete. Store as `conformance_results[repo]`.
+Store results as `conformance_results[repo]`, including the resolved fixture
+root and the gap statuses for packages that could not run the suite.
 
 ---
 
@@ -573,17 +524,17 @@ Not tested: {N}
 
 **Matrix B — Conformance Fixture Diff (fixture case-id based — HIGHEST FIDELITY):**
 
-This matrix is the authoritative cross-language equivalence signal because every SDK runs the **same** inputs and is compared against the **same** expected outputs.
+Group rows by suite and key each row by fixture-relative path and case ID. Compare only results backed by the same shared input and expectation. Show skipped, unsupported, errored and unverified cases separately from PASS and FAIL.
 
 ```
 Cross-Language Conformance (Shared Fixtures):
 
 File/Case                                              | Python | TypeScript | Rust
-registry/register.yaml: valid_registration             | PASS   | PASS       | PASS
-registry/register.yaml: duplicate_rejected             | PASS   | FAIL       | PASS
-registry/register.yaml: invalid_id_rejected            | PASS   | PASS       | FAIL
-registry/register.yaml: thread_safe_concurrent         | PASS   | FAIL       | PASS
-executor/execute.yaml: valid_execution                 | PASS   | PASS       | PASS
+registry_ordering.json: valid_registration             | PASS   | PASS       | PASS
+registry_ordering.json: duplicate_rejected             | PASS   | FAIL       | PASS
+registry_ordering.json: invalid_id_rejected            | PASS   | PASS       | FAIL
+registry_ordering.json: thread_safe_concurrent         | PASS   | FAIL       | PASS
+call_chain.json: valid_execution                 | PASS   | PASS       | PASS
 ...
 
 Conformance pass rate:
@@ -652,7 +603,7 @@ Spec sources: {spec_repo_names and doc counts}
 
 ═══ SHARED CONFORMANCE FIXTURES ═══
 
-  Fixture files loaded: {N} (from {doc_repo}/tests/conformance/)
+  Fixture files loaded: {N} (from {conformance_path}/)
   Total cases: {N}
 
   Per-repo results:
@@ -661,14 +612,14 @@ Spec sources: {spec_repo_names and doc counts}
     apcore-rust:         {pass}/{total} PASS, {N} UNSUPPORTED, {N} SKIPPED
 
   DIVERGENCES (CRITICAL — cross-language golden test mismatch):
-    [registry/register.yaml:duplicate_rejected]
+    [registry_ordering.json:duplicate_rejected]
       apcore-python: PASS (raised DuplicateError, code=DUPLICATE)
       apcore-typescript: FAIL (silently overwrote, returned null)
       apcore-rust: PASS
       Action: Fix TypeScript register() to raise DuplicateError when id exists and overwrite=false
 
   COVERAGE GAPS (fixtures vs Contract):
-    [registry/register.yaml] does not cover Contract rule: inputs.module.type_check / reject_with=TypeError
+    [registry_ordering.json] does not cover Contract rule: inputs.module.type_check / reject_with=TypeError
       Add a case with non-Module value for `module` and expect error code TYPE_ERROR
 
 ═══ TEST AUTHENTICITY ═══
@@ -721,11 +672,11 @@ Convert every divergence (both Matrix A inconsistencies and Matrix B divergences
   suggestion: {concrete fix}
 
 - severity: warning
-  file: {doc_repo}/tests/conformance/{fixture_file}
+  file: {conformance_path}/{fixture_file}
   line: 1
   title: [T-F-003] Fixture coverage gap — Contract rule not exercised
   description: Fixture does not cover Contract rule {rule}. Adding a case would make cross-language divergence in this rule detectable.
-  suggestion: Append case skeleton (see shared/conformance-fixtures.md).
+  suggestion: Add a case in the fixture's documented JSON format.
 ```
 
 Severity mapping:
@@ -740,7 +691,7 @@ Severity mapping:
 | Fixture coverage gap | warning |
 | Spec missing `## Contract:` block (from Step 1.3 warning) | warning |
 
-If no divergences, still emit the header with `_(No actionable issues found — all tests pass and cross-language conformance is green.)_`.
+If there are no findings, emit the header and summarize the test and conformance execution coverage. Report unverified suites separately.
 
 ---
 

@@ -11,16 +11,15 @@ Executed by **extraction sub-agents**, not by an orchestrator. Split out of
 
 #### What Constitutes the Public API
 
-The public API is defined by the **protocol specification** and **feature specs**
-of the scope group's documentation repo — `{doc_repo}/PROTOCOL_SPEC.md` (when the
-group has one) and `{doc_repo}/docs/features/*.md`. Each SDK in that group must
-implement those contracts.
+The caller resolves `{doc_repo}` from the implementation's `repos[].spec_root`.
+For example, Core uses `apcore/` and MCP uses `apcore-surfaces/mcp/`. Take the
+implementation directory from the same record's `path`. If `spec_root` is null,
+continue with implementation-only extraction and report the missing authority.
 
-`{doc_repo}` is resolved per scope group by the caller, not assumed: `apcore/` for
-`core`, `apcore-mcp/` for `mcp`, and the corresponding docs repo for any further
-group. Do not read `apcore/PROTOCOL_SPEC.md` when extracting a non-core SDK — it
-describes a different contract, and silently comparing against it produces
-confident, wrong findings.
+Extract exports and observable behavior from source. The caller compares those
+records with the authoritative `{doc_repo}/PROTOCOL_SPEC.md` where present and
+`{doc_repo}/docs/features/*.md`. The comparison opens the resolved files for
+the current run, so changes to the shared specs take effect on cache hits.
 
 Public API surface includes:
 1. **Exported classes/structs** — listed in `__init__.py` (Python), `index.ts` (TypeScript), `lib.rs` (Rust), etc.

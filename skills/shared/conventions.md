@@ -7,18 +7,14 @@ Canonical conventions that all apcore repositories must follow. Used by audit, s
 
 #### Version Synchronization Rules
 
-**Sync Groups** — versions within a group MUST match (major.minor):
+For each configured `version_groups` entry, package versions must agree on
+major.minor. Discovery creates default groups for Core, MCP, A2A, and CLI as
+defined in [shared discovery §0.4](ecosystem.md#04-load-configuration). Toolkit
+packages are checked individually by D3 by default. Framework integrations
+follow their own release cadence.
 
-Repos of the same type form a sync group automatically. The group name is the type.
-
-| Group | Pattern | Examples |
-|---|---|---|
-| `core` | `apcore-{lang}` | apcore-python, apcore-typescript, apcore-go |
-| *{type}* | `apcore-{type}-{lang}` | apcore-mcp-python, apcore-a2a-go, apcore-toolkit-java, etc. |
-
-New types are auto-discovered — any repo matching `apcore-{type}-{lang}` forms a sync group named `{type}`.
-
-**Integration versions** are independent — they follow their own release cadence.
+Cross-language API and behavioral comparisons group packages by shared
+`spec_root`, including Toolkit.
 
 **Version files per language:**
 
@@ -26,31 +22,30 @@ New types are auto-discovered — any repo matching `apcore-{type}-{lang}` forms
 |---|---|
 | Python | `pyproject.toml` → `[project] version`, `src/*/__init__.py` → `__version__` |
 | TypeScript | `package.json` → `"version"`, `src/index.ts` → `VERSION` constant (if present) |
-| Go | `go.mod` (no version), use git tags `v{X.Y.Z}` |
+| Go | Version from the configured package tag, e.g. `mcp/go/v1.2.3` |
 | Rust | `Cargo.toml` → `[package] version` |
 | Java | `pom.xml` → `<version>`, or `build.gradle` → `version` |
 
 #### Naming Conventions
 
-**Repository naming:**
+**Target IDs and checkout paths:**
 
-General pattern: `apcore-{type}-{language}` — with two exceptions:
-- Core SDKs omit the type: `apcore-{language}` (e.g., `apcore-python`, `apcore-go`)
-- Framework integrations invert: `{framework}-apcore` (e.g., `django-apcore`, `nestjs-apcore`)
-
-Examples: `apcore-mcp-go`, `apcore-a2a-rust`, `apcore-toolkit-java`, `apcore-gateway-python` (future types follow the same pattern automatically)
+| Target | ID | Path relative to the ecosystem root |
+|---|---|---|
+| Core SDK | `apcore-<lang>` | `apcore/<lang>/` |
+| MCP, A2A, CLI, Toolkit | `apcore-<component>-<lang>` | `apcore-surfaces/<component>/<lang>/` |
+| Framework integration | `<framework>-apcore` | `<framework>-apcore/` |
 
 **Package naming:**
 
-General pattern: `apcore-{type}` (same as repo name without the language suffix). New types follow this automatically.
+Surface package names use `apcore-{type}`. Published names come from the local
+package manifest.
 
 | Language | Core SDK | Other types (e.g., mcp, a2a, toolkit) | Integration |
 |---|---|---|---|
 | Python (PyPI) | `apcore` | `apcore-{type}` | `{framework}-apcore` |
 | TypeScript (npm) | `apcore-js` | `apcore-{type}` | `{framework}-apcore` |
-| Go (module) | `github.com/aipartnerup/apcore-go` | `github.com/aipartnerup/apcore-{type}-go` | — |
 | Rust (crates) | `apcore` | `apcore-{type}` | — |
-| Java (Maven) | `com.aipartnerup:apcore` | `com.aipartnerup:apcore-{type}` | — |
 
 **Code naming (cross-language canonical forms):**
 
@@ -66,11 +61,14 @@ All public API names originate from the protocol spec. When implementing in a la
 
 #### Project Structure Convention
 
-Every project type follows the same skeleton: `src/`, `tests/` (mirroring src), `examples/` (if applicable), plus build config and docs. The structures below are **snapshots** of current reference implementations — not prescriptive templates. New types derive their structure dynamically from the reference implementation (see `apcore-skills:sdk`). Do not add new type-specific structures here; they will be discovered automatically.
+The structures below illustrate typical package layouts. Follow the selected
+reference implementation and the target language's conventions when scaffolding.
+Core and Surface packages keep shared feature specs and fixtures under their
+component's `spec_root`.
 
 **Core SDK structure:**
 ```
-apcore-{lang}/
+apcore/<lang>/
 ├── src/                     # or language-appropriate source dir
 │   ├── {main module}        # __init__.py / index.ts / lib.rs / main.go
 │   ├── executor.{ext}
@@ -102,8 +100,9 @@ apcore-{lang}/
 │   ├── simple_client.{ext}  # basic executor + module + execute flow
 │   ├── bindings/            # binding module examples with YAML config
 │   └── modules/             # decorator-based module examples
-├── docs/
+├── docs/                    # optional language-specific docs
 ├── {build-config}           # pyproject.toml / package.json / go.mod / Cargo.toml
+├── .unirelease.toml
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE
@@ -112,7 +111,7 @@ apcore-{lang}/
 
 **MCP Bridge structure:**
 ```
-apcore-mcp-{lang}/
+apcore-surfaces/mcp/<lang>/
 ├── src/
 │   ├── {main module}
 │   ├── server/              # factory, listener, router, transport
@@ -135,6 +134,7 @@ apcore-mcp-{lang}/
 │   ├── extensions/          # example extensions (greeting, math, text)
 │   └── binding_demo/        # YAML-based extension registration
 ├── {build-config}
+├── .unirelease.toml
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -142,7 +142,7 @@ apcore-mcp-{lang}/
 
 **A2A Bridge structure:**
 ```
-apcore-a2a-{lang}/
+apcore-surfaces/a2a/<lang>/
 ├── src/
 │   ├── {main module}
 │   ├── server/              # factory, executor, router, streaming, task manager
@@ -167,6 +167,7 @@ apcore-a2a-{lang}/
 │   ├── extensions/          # example extensions (greeting, math, text)
 │   └── binding_demo/        # binding configuration examples
 ├── {build-config}
+├── .unirelease.toml
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -174,7 +175,7 @@ apcore-a2a-{lang}/
 
 **Toolkit structure:**
 ```
-apcore-toolkit-{lang}/
+apcore-surfaces/toolkit/<lang>/
 ├── src/
 │   ├── {main module}
 │   ├── scanner.{ext}        # base scanner interface
@@ -209,6 +210,7 @@ apcore-toolkit-{lang}/
 │   ├── {test-verifiers}
 │   └── {test-output-factory}
 ├── {build-config}
+├── .unirelease.toml
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -260,14 +262,15 @@ Defaults are authoritative: changing a default in one integration (e.g., `APCORE
 - **Commit format:** Conventional Commits — `feat|fix|docs|style|refactor|perf|test|chore|ci(scope): message`
 - **Scope examples:** `core`, `registry`, `schema`, `acl`, `middleware`, `mcp`, `auth`, `scanner`
 - **Branch naming:** `feat/{feature}`, `fix/{issue}`, `release/v{X.Y.Z}`
-- **Tag format:** `v{X.Y.Z}` (e.g., `v0.8.0`)
+- **Tag format:** Append `X.Y.Z` to the package's `release_tag_prefix` from `.unirelease.toml`, e.g. `core/python/v0.34.0` or `mcp/rust/v0.24.0`. Independent checkouts default to the prefix `v`.
+- **Go module tags:** Use the module directory relative to the owning Git checkout followed by `/v`, e.g. `go/v1.2.3` for Core or `mcp/go/v1.2.3` for MCP. Derive the module path from the owning remote and the same relative directory.
 
 #### Testing Conventions
 
 | Language | Framework | Command | Coverage Target |
 |---|---|---|---|
 | Python | pytest + pytest-asyncio | `pytest --cov` | 90%+ |
-| TypeScript | vitest | `npx vitest run --coverage` | 90%+ |
+| TypeScript | vitest | `pnpm exec vitest run --coverage` in monorepo packages | 90%+ |
 | Go | testing | `go test -cover ./...` | 80%+ |
 | Rust | cargo test | `cargo test` + `cargo tarpaulin` | 80%+ |
 | Java | JUnit 5 | `mvn test` / `gradle test` | 80%+ |
@@ -277,11 +280,12 @@ Defaults are authoritative: changing a default in one integration (e.g., `APCORE
 - **README.md:** Must include: badge (version, coverage), installation, quick start, API overview, link to full docs
 - **CHANGELOG.md:** Keep a Changelog format, grouped by version, categories: Added, Changed, Fixed, Breaking
 - **API docs:** Inline docstrings/JSDoc, auto-generated reference where possible
-- **Protocol reference:** Always link back to `apcore/PROTOCOL_SPEC.md` for authoritative definitions
+- **Specification reference:** Link to the target's discovered `spec_root`. Link to `apcore/PROTOCOL_SPEC.md` for Core definitions.
 
 #### Dependency Conventions
 
-**General rule:** All non-core project types depend on their respective core SDK (`apcore-{lang}`). Protocol-specific types also depend on the relevant protocol SDK.
+**General rule:** All non-core project types depend on the published Core SDK for
+their language. Protocol-specific types also depend on the relevant protocol SDK.
 
 **Core SDKs** — no external SDK dependencies:
 - Schema validation: Pydantic (Python), TypeBox (TypeScript)

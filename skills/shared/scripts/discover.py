@@ -11,8 +11,7 @@ Output: a single JSON object on stdout with keys:
 
 The markdown tables in ecosystem.md remain the authoritative specification and
 the fallback when Python is unavailable or this script errors. Keep the two in
-sync; `--selftest` guards the drift-prone parts (name->type classification and
-version-string parsing).
+sync; `--selftest` covers monorepo layout, CWD selection, and version parsing.
 
 Stdlib only. No third-party dependencies.
 """
@@ -25,6 +24,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # tomllib is stdlib on 3.11+; we degrade to regex parsing when it is absent.
 try:  # pragma: no cover - availability depends on interpreter version
@@ -56,15 +56,20 @@ KNOWN_LANGS = {
     "elixir": "Elixir",
 }
 
-EXCLUDE_PREFIXES = ("aphub", "apflow", "apdev")
-EXCLUDE_NAMES = {"aipartnerup-website"}
 EXPLICIT_DOCS_SITES = {"apcore-zh", "aipartnerup-docs"}
 TOOLING_NAMES = {"apcore-studio"}
+SURFACE_TYPES = {
+    "mcp": "mcp-bridge",
+    "a2a": "a2a-bridge",
+    "cli": "cli",
+    "toolkit": "toolkit",
+}
 
 SCOPE_GROUP = {
     "core-sdk": "core",
     "mcp-bridge": "mcp",
     "a2a-bridge": "a2a",
+    "cli": "cli",
     "toolkit": "toolkit",
     "integration": "integrations",
     "protocol": "docs",
@@ -72,20 +77,11 @@ SCOPE_GROUP = {
     "shared-lib": "shared",
     "tooling": "tooling",
 }
+VERSION_GROUP_TYPES = {"core-sdk", "mcp-bridge", "a2a-bridge", "cli"}
 
 
 def classify(name: str):
-    """Return (repo_type, lang_hint) for a directory name, or None if not apcore.
-
-    Priority follows ecosystem.md §0.2: specific patterns before the
-    apcore-{type}-{lang} wildcard. `lang_hint` may be None (resolved later from
-    the build config). docs-site for bare `apcore-mcp` is detected at scan time
-    via the mkdocs heuristic, not here.
-    """
-    if name in EXCLUDE_NAMES or name.startswith(EXCLUDE_PREFIXES):
-        return None
-    if name == "apcore":
-        return ("protocol", None)
+    """Classify independently maintained sibling repos, per ecosystem.md §0.2."""
     if name in EXPLICIT_DOCS_SITES:
         return ("docs-site", None)
     if name in TOOLING_NAMES:
@@ -95,24 +91,7 @@ def classify(name: str):
     if m and m.group(1) in KNOWN_LANGS:
         return ("shared-lib", m.group(1))
 
-    m = re.fullmatch(r"apcore-mcp-([a-z0-9]+)", name)
-    if m and m.group(1) in KNOWN_LANGS:
-        return ("mcp-bridge", m.group(1))
-
-    m = re.fullmatch(r"apcore-a2a-([a-z0-9]+)", name)
-    if m and m.group(1) in KNOWN_LANGS:
-        return ("a2a-bridge", m.group(1))
-
-    m = re.fullmatch(r"apcore-([a-z0-9]+)", name)
-    if m and m.group(1) in KNOWN_LANGS:
-        return ("core-sdk", m.group(1))
-
-    m = re.fullmatch(r"apcore-([a-z0-9]+)-([a-z0-9]+)", name)
-    if m and m.group(2) in KNOWN_LANGS:
-        return (m.group(1), m.group(2))  # type = first segment (wildcard)
-
-    m = re.fullmatch(r"([a-z0-9]+)-apcore", name)
-    if m:
+    if re.fullmatch(r"[a-z0-9]+-apcore", name):
         return ("integration", None)
 
     return None
@@ -203,16 +182,18 @@ def _semver_key(tag: str):
     return tuple(int(n) for n in nums[:3]) + (0,) * (3 - len(nums[:3]))
 
 
-def latest_git_tag(path: Path):
+def latest_git_tag(path: Path, prefix: str):
     try:
         out = subprocess.run(
-            ["git", "-C", str(path), "tag", "-l", "v*"],
+            ["git", "-C", str(path), "tag", "-l", f"{prefix}*"],
             capture_output=True, text=True, timeout=15,
         )
-        tags = [t.strip() for t in out.stdout.splitlines() if t.strip()]
-        if not tags:
-            return None
-        return max(tags, key=_semver_key)
+        versions = [
+            tag[len(prefix):]
+            for tag in out.stdout.splitlines()
+            if tag.startswith(prefix) and re.fullmatch(r"\d+\.\d+\.\d+", tag[len(prefix):])
+        ]
+        return max(versions, key=_semver_key, default=None)
     except Exception:
         return None
 
@@ -276,7 +257,7 @@ def detect_language(entry: Path, kind: str, lang_hint):
     return None
 
 
-def get_version(entry: Path, kind: str, bf_path: Path):
+def get_version(entry: Path, kind: str, bf_path: Path, tag_prefix: str | None):
     text = _read(bf_path)
     if kind == "pyproject":
         v = parse_pyproject_version(text)
@@ -310,9 +291,21 @@ def get_version(entry: Path, kind: str, bf_path: Path):
         return parse_mix_version(text)
     if kind == "csproj":
         return parse_csproj_version(text)
-    if kind in ("go_mod", "swift"):
-        return latest_git_tag(entry)
+    if kind in ("go_mod", "swift") and tag_prefix:
+        return latest_git_tag(entry, tag_prefix)
     return None
+
+
+def read_release_tag_prefix(path: Path):
+    text = _read(path / ".unirelease.toml")
+    if tomllib is not None:
+        try:
+            prefix = tomllib.loads(text).get("tag_prefix")
+        except tomllib.TOMLDecodeError:
+            return None
+        return prefix if isinstance(prefix, str) and prefix.strip() else None
+    match = re.search(r"""(?m)^[ \t]*tag_prefix[ \t]*=[ \t]*(["'])([^"'\n]+)\1""", text)
+    return match.group(2) if match else None
 
 
 def get_package_name(kind: str, bf_path: Path):
@@ -342,10 +335,11 @@ def get_package_name(kind: str, bf_path: Path):
     return None
 
 
-def git_status(path: Path):
+def git_status(git_root: Path, path: Path):
     try:
         out = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
+            ["git", "-C", str(git_root), "status", "--porcelain", "--",
+             str(path.relative_to(git_root))],
             capture_output=True, text=True, timeout=15,
         )
         if out.returncode != 0:
@@ -376,7 +370,9 @@ def find_ecosystem_root(start: Path):
         return cfg_root
     cur = start.resolve()
     while True:
-        if (cur / "apcore" / "PROTOCOL_SPEC.md").exists():
+        if (cur / "apcore" / "PROTOCOL_SPEC.md").is_file() or any(
+            (cur / "apcore-surfaces" / component).is_dir() for component in SURFACE_TYPES
+        ):
             return cur
         if cur.parent == cur:
             return None
@@ -385,48 +381,81 @@ def find_ecosystem_root(start: Path):
 
 # --- Main discovery ---------------------------------------------------------
 
-def discover(root: Path):
-    repos = []
-    for entry in sorted(p for p in root.iterdir() if p.is_dir()):
-        name = entry.name
-        cls = classify(name)
-        has_mkdocs = (entry / "mkdocs.yml").exists()
-        has_src = (entry / "src").is_dir()
-        if cls is None:
-            if has_mkdocs and not has_src:
-                cls = ("docs-site", None)
-            else:
+def describe_target(name, path, rtype, *, git_root, spec_root=None, build_file=None,
+                    lang_hint=None):
+    conformance = spec_root / "conformance" if spec_root else None
+    target = {
+        "name": name, "path": str(path), "type": rtype,
+        "language": KNOWN_LANGS.get(lang_hint), "version": None, "package_name": None,
+        "git_status": git_status(git_root, path),
+        "status": rtype if rtype in ("protocol", "docs-site") else "placeholder",
+        "git_root": str(git_root),
+        "release_tag_prefix": None,
+        "spec_root": str(spec_root) if spec_root else None,
+        "conformance_path": str(conformance) if conformance and conformance.is_dir() else None,
+    }
+    if build_file:
+        kind, manifest = build_file
+        tag_prefix = read_release_tag_prefix(path)
+        if tag_prefix is None and path == git_root:
+            tag_prefix = "v"
+        target.update(
+            language=target["language"] or detect_language(path, kind, lang_hint),
+            version=get_version(path, kind, manifest, tag_prefix),
+            package_name=get_package_name(kind, manifest),
+            release_tag_prefix=tag_prefix,
+            status="ok",
+        )
+    return target
+
+
+def discover_monorepo_targets(root: Path):
+    core = root / "apcore"
+    surfaces = root / "apcore-surfaces"
+    locations = [(core, core, "apcore", "core-sdk")]
+    locations.extend(
+        (surfaces / component, surfaces, f"apcore-{component}", rtype)
+        for component, rtype in SURFACE_TYPES.items()
+    )
+    for component_path, git_root, name, rtype in locations:
+        is_core = rtype == "core-sdk"
+        has_spec = ((component_path / "PROTOCOL_SPEC.md").is_file() if is_core
+                    else (component_path / "docs").is_dir())
+        spec_root = component_path if has_spec else None
+        if spec_root:
+            yield describe_target(
+                name, spec_root, "protocol" if is_core else "docs-site",
+                git_root=git_root, spec_root=spec_root,
+            )
+        for lang in KNOWN_LANGS:
+            path = component_path / lang
+            if not path.is_dir():
                 continue
+            build_file = detect_build_file(path)
+            if build_file:
+                yield describe_target(
+                    f"{name}-{lang}", path, rtype, git_root=git_root,
+                    spec_root=spec_root, build_file=build_file, lang_hint=lang,
+                )
+
+
+def discover(root: Path):
+    repos = list(discover_monorepo_targets(root))
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        cls = classify(entry.name)
+        if cls is None:
+            continue
         rtype, lang_hint = cls
-
-        # protocol and docs-site repos are intentionally build-config-less
-        # (spec/doc authorities), so they are "present" rather than placeholder.
-        if rtype in ("protocol", "docs-site"):
-            repos.append({
-                "name": name, "path": str(entry), "type": rtype,
-                "language": None, "version": None, "package_name": None,
-                "git_status": git_status(entry), "status": rtype,
-            })
-            continue
-
-        bf = detect_build_file(entry)
-        if bf is None:
-            repos.append({
-                "name": name, "path": str(entry), "type": rtype,
-                "language": KNOWN_LANGS.get(lang_hint) if lang_hint else None,
-                "version": None, "package_name": None,
-                "git_status": git_status(entry), "status": "placeholder",
-            })
-            continue
-
-        kind, bf_path = bf
-        repos.append({
-            "name": name, "path": str(entry), "type": rtype,
-            "language": detect_language(entry, kind, lang_hint),
-            "version": get_version(entry, kind, bf_path),
-            "package_name": get_package_name(kind, bf_path),
-            "git_status": git_status(entry), "status": "ok",
-        })
+        is_docs = rtype == "docs-site"
+        repos.append(describe_target(
+            entry.name, entry, rtype, git_root=entry,
+            spec_root=entry if is_docs else None,
+            build_file=None if is_docs else detect_build_file(entry),
+            lang_hint=lang_hint,
+        ))
+    repos.sort(key=lambda repo: repo["name"])
 
     repos_by_type: dict[str, list[str]] = {}
     for r in repos:
@@ -434,20 +463,17 @@ def discover(root: Path):
 
     version_groups: dict[str, list[str]] = {}
     for r in repos:
-        grp = SCOPE_GROUP.get(r["type"])
-        if grp is None:  # wildcard apcore-{type}-{lang}
-            grp = r["type"]
-        if r["type"] in ("core-sdk", "mcp-bridge", "a2a-bridge") or \
-                r["type"] not in SCOPE_GROUP:
-            version_groups.setdefault(grp, []).append(r["name"])
+        if r["type"] in VERSION_GROUP_TYPES:
+            version_groups.setdefault(SCOPE_GROUP[r["type"]], []).append(r["name"])
 
     return repos, repos_by_type, version_groups
 
 
 def detect_cwd_repo(repos, cwd: Path):
-    base = cwd.name
-    for r in repos:
-        if r["name"] == base:
+    cwd = cwd.resolve()
+    by_path = {Path(r["path"]).resolve(): r for r in repos}
+    for path in (cwd, *cwd.parents):
+        if (r := by_path.get(path)) is not None:
             grp = SCOPE_GROUP.get(r["type"], r["type"])
             return {"name": r["name"], "type": r["type"],
                     "language": r["language"], "scope_group": grp}
@@ -470,16 +496,109 @@ def build_output(root: Path, cwd: Path):
 
 # --- Self-test --------------------------------------------------------------
 
+def selftest_monorepos():
+    with TemporaryDirectory() as temp:
+        root = Path(temp).resolve()
+
+        def write_file(path, content=""):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+        core = root / "apcore"
+        surfaces = root / "apcore-surfaces"
+        write_file(core / "PROTOCOL_SPEC.md")
+        components = {
+            "apcore": (core, core),
+            **{
+                f"apcore-{component}": (surfaces / component, surfaces)
+                for component in ("mcp", "a2a", "cli", "toolkit")
+            },
+        }
+        manifests = {
+            "python": ("pyproject.toml", '[project]\nname="package"\nversion="2.1.0"\n'),
+            "rust": ("Cargo.toml", '[package]\nname="package"\nversion="2.1.0"\n'),
+            "typescript": ("package.json", '{"name":"package","version":"2.1.0"}'),
+        }
+        for name, (spec_root, _) in components.items():
+            write_file(spec_root / "docs" / "index.md")
+            write_file(spec_root / "conformance" / "case.json")
+            if spec_root != core:
+                write_file(root / name / "mkdocs.yml")
+            for lang, (manifest, content) in manifests.items():
+                write_file(spec_root / lang / manifest, content)
+                write_file(root / f"{name}-{lang}" / manifest, content.replace("2.1.0", "1.0.0"))
+
+        # An old language checkout without a monorepo peer is also ignored.
+        write_file(root / "apcore-go" / "go.mod", "module example.org/apcore-go")
+        write_file(root / "flask-apcore" / "pyproject.toml", manifests["python"][1])
+        core_cwd = core / "python" / "src" / "apcore"
+        mcp_cwd = surfaces / "mcp" / "typescript" / "src" / "server"
+        for cwd in (core_cwd, mcp_cwd):
+            cwd.mkdir(parents=True)
+            assert find_ecosystem_root(cwd) == root, cwd
+
+        output = build_output(root, core_cwd)
+        repos = {r["name"]: r for r in output["repos"]}
+        assert len(repos) == len(output["repos"]), "Duplicate discovery names"
+        expected_names = {"flask-apcore", *components}
+        expected_names.update(f"{name}-{lang}" for name in components for lang in manifests)
+        assert repos.keys() == expected_names, sorted(repos)
+        for name, (spec_root, git_root) in components.items():
+            assert repos[name]["path"] == str(spec_root), name
+            for lang in manifests:
+                repo = repos[f"{name}-{lang}"]
+                assert repo["path"] == str(spec_root / lang), repo
+                assert repo["version"] == "2.1.0", repo
+                assert repo["package_name"] == "package", repo
+                assert repo["git_root"] == str(git_root), repo
+                assert repo["spec_root"] == str(spec_root), repo
+                assert repo["conformance_path"] == str(spec_root / "conformance"), repo
+
+        assert output["cwd_repo"]["name"] == "apcore-python", output["cwd_repo"]
+        mcp_target = detect_cwd_repo(output["repos"], mcp_cwd)
+        assert mcp_target == {
+            "name": "apcore-mcp-typescript", "type": "mcp-bridge",
+            "language": "TypeScript", "scope_group": "mcp",
+        }, mcp_target
+        assert detect_cwd_repo(output["repos"], root / "apcore-mcp-typescript") is None
+        assert detect_cwd_repo(output["repos"], core)["name"] == "apcore"
+        assert detect_cwd_repo(output["repos"], surfaces / "mcp" / "docs")["name"] == "apcore-mcp"
+        assert detect_cwd_repo(output["repos"], surfaces) is None
+        assert detect_cwd_repo(output["repos"], root / "flask-apcore" / "src")["name"] == "flask-apcore"
+
+        go = core / "go"
+        write_file(go / "go.mod", "module example.org/apcore/go")
+        write_file(go / ".unirelease.toml", 'tag_prefix = "go/v"\n')
+        new_package = build_output(root, go)["cwd_repo"]
+        assert new_package and new_package["name"] == "apcore-go", new_package
+
+        git = [
+            "git", "-C", str(core),
+            "-c", "user.name=Discovery Test", "-c", "user.email=test@example.org",
+            "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false",
+            "-c", "core.hooksPath=/dev/null",
+        ]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "commit", "-qm", "fixture", "--allow-empty"], check=True)
+        for tag in ("go/v2.1.0", "go/v3.0.0-beta", "core/rust/v4.0.0", "v5.0.0"):
+            subprocess.run([*git, "tag", tag], check=True)
+        repos_with_go = {r["name"]: r for r in discover(root)[0]}
+        assert repos_with_go["apcore-go"]["release_tag_prefix"] == "go/v"
+        assert repos_with_go["apcore-go"]["version"] == "2.1.0"
+        assert repos_with_go["flask-apcore"]["release_tag_prefix"] == "v"
+
+        (surfaces / "toolkit" / "rust" / "Cargo.toml").unlink()
+        assert "apcore-toolkit-rust" not in {r["name"] for r in discover(root)[0]}
+        (core / "PROTOCOL_SPEC.md").unlink()
+        assert find_ecosystem_root(mcp_cwd) == root, "Discover without the Core protocol marker"
+
+
 def selftest():
     cases = {
-        "apcore": ("protocol", None),
-        "apcore-python": ("core-sdk", "python"),
-        "apcore-typescript": ("core-sdk", "typescript"),
-        "apcore-rust": ("core-sdk", "rust"),
-        "apcore-mcp-python": ("mcp-bridge", "python"),
-        "apcore-mcp-typescript": ("mcp-bridge", "typescript"),
-        "apcore-a2a-go": ("a2a-bridge", "go"),
-        "apcore-toolkit-rust": ("toolkit", "rust"),
+        "apcore-python": None,
+        "apcore-mcp-python": None,
+        "apcore-a2a-go": None,
+        "apcore-toolkit-rust": None,
         "apcore-discovery-python": ("shared-lib", "python"),
         "django-apcore": ("integration", None),
         "nestjs-apcore": ("integration", None),
@@ -506,6 +625,7 @@ def selftest():
     assert parse_csproj_version("<Version>5.5.5</Version>") == "5.5.5"
     assert parse_dunder_version('__version__ = "7.7.7"') == "7.7.7"
     assert parse_ts_version('export const VERSION = "1.1.1"') == "1.1.1"
+    selftest_monorepos()
     print("discover.py selftest: OK")
 
 

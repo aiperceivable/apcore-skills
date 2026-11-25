@@ -57,7 +57,7 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 ## When to Use
 
-- Starting any new apcore project in a new language (any `--type` — auto-discovered from reference)
+- Adding a language package to Core or an existing Surface component
 - Re-scaffolding an existing project that needs restructuring
 
 ## Command Format
@@ -68,16 +68,16 @@ Bootstrap a new apcore project in a new language. The project type is auto-disco
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `<language>` | Yes | — | Target language: `go`, `rust`, `java`, `csharp`, `kotlin`, `swift`, `php` |
-| `--type` | No | `core` | Project type (e.g., `core`, `mcp`, `a2a`, `toolkit`). Any string — new types are auto-supported via reference discovery. |
+| `<language>` | Yes | — | Language directory recognized by discovery, e.g.  `rust`, `typescript`, `python` |
+| `--type` | No | `core` | Component: `core`, `mcp`, `a2a`, `cli`, or `toolkit`. |
 | `--ref` | No | auto-detect | Reference implementation to extract API from |
 
 **Example:**
 ```
-/apcore-skills:sdk go --type mcp
+/apcore-skills:sdk rust --type mcp
 → Discovers apcore-mcp-python as reference
 → Extracts API contract (server/, auth/, adapters/, converters/, cli, explorer)
-→ Scaffolds apcore-mcp-go/ with Go source stubs, test stubs, and ported examples
+→ Scaffolds apcore-surfaces/mcp/rust/ (target ID apcore-mcp-rust)
 ```
 
 ## Context Management
@@ -87,7 +87,7 @@ Steps 2 and 4 use sub-agents. Step 2 analyzes the reference implementation. Step
 ## Workflow
 
 ```
-Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs w/ Contract blocks) → 6 (code-forge config) → 7 (git init) → 8 (port) → 9 (impl) → 9.5 (consistency gate — sync + tester) → 10 (summary)
+Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech stack) → 4 (scaffold) → 5 (feature specs w/ Contract blocks) → 6 (code-forge config) → 7 (register and commit in monorepo) → 8 (port) → 9 (impl) → 9.5 (consistency gate — sync + tester) → 10 (summary)
 ```
 
 ## Bundled References
@@ -113,20 +113,32 @@ Step 0 (ecosystem) → 1 (parse args) → 2 (extract API contract) → 3 (tech s
 
 Parse `$ARGUMENTS`:
 
-1. Extract `<language>` — required, ask the user if missing
-2. Extract `--type` — default `core`
-3. Extract `--ref` — resolve reference repo (priority order):
-   - If `--ref` explicitly specified: use that
-   - **If CWD is a same-type apcore repo** (e.g., in `apcore-python/` and `--type core`): use CWD repo as reference
-   - Otherwise auto-detect: look for `apcore-{type}-python` in ecosystem root (for `core` type, look for `apcore-python`)
+1. Extract `<language>` and `--type` (`core` by default). Use a language key
+   recognized by shared discovery. Normalize aliases such as `python` → `py`
+   and `ts` → `typescript` before choosing the directory or target ID.
+2. Resolve the selected component's documentation record from `repos[]` and
+   use its `path` as `spec_root` and its `git_root` as the owning checkout.
+   If the component record is missing, report which checkout or spec must be
+   present before bootstrapping.
 
-Derive target repo name using the naming pattern:
-- `core` type → `apcore-{lang}` (special case: no type infix)
-- All other types → `apcore-{type}-{lang}` (e.g., `apcore-mcp-go`, `apcore-a2a-rust`, `apcore-toolkit-java`)
+   | Component | Path relative to ecosystem root | Target ID |
+   |---|---|---|
+   | Core | `apcore/<lang>/` | `apcore-<lang>` |
+   | MCP, A2A, CLI, Toolkit | `apcore-surfaces/<component>/<lang>/` | `apcore-<component>-<lang>` |
 
-Derive target path: `{ecosystem_root}/{target-repo-name}/`
+   Set `target-path` to `<spec_root>/<lang>` and use `git rev-parse --show-toplevel`
+   from the component to confirm its owning checkout.
+3. Resolve `--ref` as a discovered package ID or the path of a discovered
+   package in this component. If omitted, resolve `cwd_repo.name` in `repos[]`
+   and prefer that package when its record shares the same `spec_root` and
+   differs from the target. Otherwise
+   use its configured reference or the component's Python package. If neither
+   is suitable, select another discovered implementation of the component.
+   Resolve `ref_path` from the selected record's `path`.
 
-**Data flow:** Step 1 adds: `lang`, `type`, `ref_path`, `target-repo-name`, `target-path`
+**Data flow:** Step 1 adds `lang`, `type`, `spec_root`, `git_root`, `ref_path`,
+`ref-repo-name`, `target-repo-name`, `target-path`, and the component's
+`conformance_path` from its discovery record.
 
 Check if target directory already exists:
 - If exists with source files: warn and ask — "Update scaffolding" / "Use as-is" / "Cancel"
@@ -145,7 +157,7 @@ SDK Bootstrap:
 
 ### Step 2: Extract API Contract (Sub-agent)
 
-Spawn `Agent(subagent_type="general-purpose")` with the prompt from `references/extract-api-contract.md`, filling in: `{lang}`, `{ref_path}`, `{type}`, `{protocol_path}`.
+Spawn `Agent(subagent_type="general-purpose")` with the prompt from `references/extract-api-contract.md`, filling in `{lang}`, `{ref_path}`, `{type}`, `{protocol_path}`, and `{spec_root}`.
 
 Store result as `api_contract`. If the sub-agent returns STATUS: NOT_FOUND or NO_EXPORTS, display error and ask the user to either provide a different reference or abort.
 
@@ -156,12 +168,6 @@ Store result as `api_contract`. If the sub-agent returns STATUS: NOT_FOUND or NO
 Ask the user to confirm the target language tech stack.
 
 @../shared/conventions.md (refer to "Testing Conventions" and "Dependency Conventions" sections)
-
-**For Go:**
-- Go version: "1.21+ (Recommended)" / "1.22+"
-- Module path: default `github.com/aipartnerup/{target-repo-name}`
-- Test extras: "Standard testing (Recommended)" / "testify"
-- Schema validation: "go-jsonschema (Recommended)" / "gojsonschema" / "Other"
 
 **For Rust:**
 - Rust edition: "2021 (Recommended)" / "2024"
@@ -183,9 +189,11 @@ Store `tech_stack` decisions.
 
 ### Step 4: Scaffold Project (Sub-agent)
 
-Spawn `Agent(subagent_type="general-purpose")` with the prompt from `references/scaffold-project.md`, filling in: `{target-repo-name}`, `{target-path}`, `{lang}`, `{type}`, `{tech_stack}`, `{package_name}`, `{api_contract}`, `{ref_path}`, `{conventions_path}` (= resolved path to `../shared/conventions.md`).
+Spawn `Agent(subagent_type="general-purpose")` with the prompt from `references/scaffold-project.md`, filling in: `{target-repo-name}`, `{target-path}`, `{lang}`, `{type}`, `{tech_stack}`, `{package_name}`, `{api_contract}`, `{ref_path}`, `{spec_root}`, `{conformance_path}`, `{conventions_path}` (= resolved path to `../shared/conventions.md`).
 
-After sub-agent completes, verify:
+After sub-agent completes, rerun discovery. The new target ID must resolve to
+`target-path` and report the expected `git_root`, `spec_root`, and
+`release_tag_prefix`. Verify:
 - Build config file exists
 - Main module file exists with exports
 - At least 3 source files exist
@@ -198,15 +206,15 @@ After sub-agent completes, verify:
 
 ### Step 5: Generate Feature Specs
 
-Check if feature specs already exist at `{protocol_path}/docs/features/*.md`.
+Check if feature specs already exist at `{spec_root}/docs/features/*.md`.
 
 If they exist:
 - Link to them via `.code-forge.json` configuration
-- Display: `Feature specs found: {N} specs in {protocol_path}/docs/features/`
+- Display: `Feature specs found: {N} specs in {spec_root}/docs/features/`
 
 If they don't exist:
 - Extract module list from the API contract
-- Generate feature specs at `{target-path}/docs/features/`:
+- Generate shared feature specs at `{spec_root}/docs/features/`:
   - One per module (executor, registry, schema, etc.)
   - Each spec contains:
     - Module purpose
@@ -225,18 +233,26 @@ If they don't exist:
 
 ### Step 6: Generate .code-forge.json
 
+Create a package-local relative symlink `{target-path}/.apcore-specs` pointing
+to `{spec_root}/docs/features/`. Preserve a pre-existing link if it already
+points there. This lets code-forge resolve the shared files through a relative
+input path accepted by its directory validator.
+
 Write `{target-path}/.code-forge.json`:
 ```json
 {
   "directories": {
     "base": "./",
-    "input": "{relative-path-to-feature-specs}",
+    "input": ".apcore-specs",
     "output": "planning/"
   },
   "port": {
-    "source_docs": "{relative-path-to-protocol}",
+    "source_docs": "{relative-path-to-component-spec-root}",
     "reference_impl": "{relative-path-to-ref}",
     "target_lang": "{lang}"
+  },
+  "git": {
+    "auto_commit": false
   },
   "execution": {
     "default_mode": "ask",
@@ -246,25 +262,24 @@ Write `{target-path}/.code-forge.json`:
 }
 ```
 
-Optionally add `reference_docs.sources` if the reference repo has `planning/` output. After writing, resolve each relative path (`input`, `reference_impl`, `source_docs`) and warn if any don't exist yet. Missing paths are acceptable (they may be created later) but should be noted.
+Resolve the configuration from `target-path` and verify it reads shared feature
+specs, selects the intended reference package, and keeps planning output under
+the target package.
 
 ---
 
-### Step 7: Git Initialization
+### Step 7: Register and Commit the Package
 
-Initialize git and create the skeleton commit automatically:
+Use the owning monorepo's Git history and CI. Follow its workflow conventions
+and register the new package in the applicable test and distribution workflows.
+Extend a shared job or matrix when it already supports the language. Otherwise
+add the smallest language-specific job needed to run the new package's tests
+from its package directory, including shared conformance.
 
-```bash
-cd {target-path}
-git init
-git add .
-git commit -m "chore: initialize {target-repo-name} project skeleton"
-```
-
-Display:
-```
-Git initialized with skeleton commit.
-```
+Gather the files edited for this package, including shared spec or CI files
+from this bootstrap. Stage and commit the explicit repository-relative paths
+from `git_root`. Use the same path-scoped commit procedure after implementation.
+Preserve existing edits and verify the commit's file list after staging.
 
 ---
 
@@ -276,10 +291,14 @@ Scaffolding complete. Continuing with implementation plan generation...
 ```
 
 Invoke `/code-forge:port` with the following context:
-- `source_docs`: `{protocol_path}`
-- `reference_impl`: `{ref_path}`
+- `source_docs`: `{spec_root}`
+- `reference_impl`: the absolute discovered `{ref_path}` passed as `--ref`
 - `target_lang`: `{lang}`
 - Working directory: `{target-path}`
+
+Pass the existing package directory as the custom target and select **Use as-is**
+when port offers to initialize or update it. Retain the package configuration
+from Step 6 and the owning monorepo's Git checkout.
 
 This generates per-feature implementation plans with TDD task breakdowns in `{target-path}/planning/`.
 
@@ -301,11 +320,7 @@ Invoke `/code-forge:impl` to execute all planned features sequentially. Each fea
 
 Continue until all features are implemented or a blocking error occurs. If a blocking error occurs, stop and display the error with context so the user can intervene.
 
-After each feature completes, commit the implementation:
-```bash
-git add .
-git commit -m "feat({module}): implement {feature-name} for {target-repo-name}"
-```
+After each feature completes, commit the explicit feature paths from `git_root` as in Step 7.
 
 ---
 
@@ -332,29 +347,28 @@ Parse the saved report for:
 
 #### 9.5.2 Tester Run
 
-Only run if the reference has a conformance suite:
+Run when the component has a discovered conformance suite. Use both package IDs to compare the same cases:
 
 ```
-/apcore-skills:tester {target-repo-name} --mode full --category all --save {ecosystem_root}/sdk-bootstrap-tester-{target-repo-name}.md
+/apcore-skills:tester {target-repo-name} {ref-repo-name} --mode run --category conformance --save {ecosystem_root}/sdk-bootstrap-tester-{target-repo-name}.md
 ```
 
-If the reference has `tests/conformance/` fixtures, the new SDK's conformance runner must have been scaffolded in Step 4. Verify it runs and emits CONFORMANCE_CASE blocks. If the runner is missing or emits UNSUPPORTED for many ops, surface as "Conformance runner incomplete — implement missing primitives in tests/conformance_runner.{ext}".
-
-Parse the saved report for:
-- Cross-language divergences (Matrix B)
-- Authenticity-blocked stubs
+Verify the new package's native tests ran the requested shared cases. Record
+conformance divergences, suite errors, and cases with missing execution evidence
+for the new package from the tester report.
 
 #### 9.5.3 Gate Decision
 
-**Rule:** PASS if and only if **all four** of the following are zero:
+**Rule:** PASS if and only if all of the following are zero:
 - `sync_critical` — CRITICAL findings from `/apcore-skills:sync` (Phase A + Phase B + contract tier + deep-chain tier)
 - `contract_divergences` — sync Step 4B / audit D10 findings (counted from the sync report's Contract tier section, A-C-* namespace)
 - **`deep_chain_divergences` — sync Step 4C / audit D11 findings (counted from the sync report's Deep-Chain Parity section, A-D-* namespace). Any critical OR warning OR inconclusive finding counts. Info findings do not count.**
 - `fixture_divergences` — cross-language conformance matrix mismatches from tester (Matrix B in tester Step 4)
+- `fixture_gaps` — cases expected of the new package without a proven PASS, including failed assertions or unavailable suites
 
-If any of the four is greater than zero → **FAIL**. Present the highest-severity findings first.
+If any is greater than zero → **FAIL**. Present the highest-severity findings first.
 
-Rationale: all four counts measure distinct failure modes:
+The gate covers distinct failure modes:
 - **signature mismatch** (shape) — Phase A Steps 4.1–4.3
 - **intent mismatch, shape-level** — Phase A Step 4B (declared contract tuples diverge)
 - **intent mismatch, chain-level** — Phase A Step 4C (actual source code diverges in ways the Contract block does not capture; this is the failure mode that blind-spots shape-level checks)
