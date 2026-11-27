@@ -93,7 +93,7 @@ Unified consistency verification across all apcore ecosystem documentation and i
 |------|---------|-------------|
 | positional repos | — | Comma-separated repo names to sync. See **Positional Repo Arguments** below. |
 | `--skip-docs` | off (docs are audited) | Skip **Phase B** — the documentation-consistency pass (Step 6: one sub-agent per doc repo + one per impl repo). Use it when you changed code and not docs. **It is a minor cost lever, not the cheap-run switch**: it drops R+1 sub-agents (4 on core scope) while `--deep-chain off` drops one per module (22 on `apcore/`). Reach for `--deep-chain off` first. |
-| `--fix` | off | Auto-fix issues (naming, stubs, doc references) |
+| `--fix` | off | Auto-fix safe issues (naming, mechanical symbols/derives, doc references) — defers non-trivial missing APIs/behavior to manual review instead of generating hollow `TODO` stubs |
 | `--scope` | **cwd** | Which group: `core`, `mcp`, `integrations`, `all`. Values are the shared scope vocabulary from `shared/ecosystem.md` §0.3 — identical across every skill in this plugin. **If omitted and no positional repos, defaults to the current working directory's repo only.** `integrations` runs the documentation pass only: integration repos have no protocol spec to compare against, so Phase A is N/A for them (Step 1.2) — this is the same routing sync already applies when CWD is an integration repo, not a special case of the flag. |
 | `--lang` | all discovered | Comma-separated list of languages to compare |
 | `--internal-check` | `contract` | Internal consistency tier. `none` = public API only. `contract` = **DEFAULT** — also compare behavioral contracts (inputs validation, errors raised, side-effect order, return shape, properties) via Step 4B, static. `skeleton` = contract + algorithm checkpoint sequences (Step 4A, static, requires source instrumentation). `behavior` = all static tiers + hand off to `tester` skill for runtime behavioral equivalence (Step 7.5, dynamic). Higher tiers include lower tiers. Function-level (helper) identity is intentionally NOT supported — see Anti-Rationalization Table. |
@@ -1184,10 +1184,10 @@ When `n_strict_suppressed > 0` AND `STRICT_MODE == false`, append a one-line hin
 
 **After the Combined Report, ALWAYS append a review-compatible report so that `/code-forge:fix --review` can directly consume it.**
 
-Convert all CRITICAL and WARNING findings from both phases into `code-forge:review` format. Format follows `code-forge:review` output schema (see `code-forge/skills/review/SKILL.md`). If the review format changes, update this mapping accordingly.
+First cluster surviving CRITICAL and WARNING findings from Phase A and Phase B into a `## Root Cause Analysis` table (`RC-1`, `RC-2`, ... — evidence-first only, never altering post-9.0 counts) when multiple findings share an underlying cause (e.g., a spec/API change echoing across Phase A signature/contract findings and Phase B README/example/test mismatches), then emit every CRITICAL and WARNING entry under `## Consistency` in `code-forge:review` format (see `code-forge/skills/review/SKILL.md`). If the review format changes, update this mapping accordingly.
 
 See **§4 Review-Compatible Issue Report** in `@references/report-formats.md`
-for the entry template, the sync→review severity mapping table, deep-chain
+for the `## Root Cause Analysis` table, entry template, the sync→review severity mapping table, deep-chain
 multi-language rendering, the grouping rules, and the empty case.
 
 ---
@@ -1206,12 +1206,14 @@ Wait for all sub-agents to complete. Display consolidated results:
 Auto-fix results:
 
 Implementation repos:
-  apcore-typescript: Phase A: 3 naming fixes, 1 stub | Phase B: 2 readme, 1 example, 2 test fixes
+  apcore-typescript: Phase A: 3 naming fixes, 1 symbol | Phase B: 2 readme, 1 example, 2 test fixes
     Tests: 287/287 ✓
     Files: 8 changed
+    Manual review: {count} deferred items (non-trivial missing APIs/scenarios, deep-chain findings)
   apcore-mcp-typescript: Phase A: 1 naming fix | Phase B: 0 readme, 0 example, 1 test fix
     Tests: 112/112 ✓
     Files: 2 changed
+    Manual review: none
 
 Documentation repos:
   apcore: 2 contradiction fixes, 1 flagged for manual review

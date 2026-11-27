@@ -544,16 +544,24 @@ ID when applicable. Use a full-file overwrite for the report.
 
 **After the consolidated report, ALWAYS append a review-compatible report so that `/code-forge:fix --review` can directly consume audit output.**
 
-Convert all CRITICAL and WARNING findings across dimensions D1–D10 into `code-forge:review` format. Format matches `code-forge:review` output schema and mirrors sync's Step 9.1 so that a single downstream consumer can ingest either skill's output.
+Convert all CRITICAL and WARNING findings across dimensions D1–D11 into `code-forge:review` format. Format matches `code-forge:review` output schema and mirrors sync's Step 9.1 so that a single downstream consumer can ingest either skill's output.
 
 Use the `# Project Review:` header with a dynamic scope description (derived from Step 1 — e.g., repo name, scope group, or "all"). Output the review-compatible report as **raw markdown** (not inside a fenced code block) so that code-forge:fix can parse it from the conversation context.
 
 ```markdown
 # Project Review: {scope_description}
 
+## Root Cause Analysis
+
+{Cluster surviving blocker/critical/warning findings across D1–D11 by shared underlying root cause (evidence-first only — never invent findings or alter counts/scores). When one underlying change (e.g., a spec update or missing shared validation) produced multiple findings across dimensions (D1 + D4 + D5 + D10/D11), group them into one `RC-{n}` entry so `/code-forge:fix --review` solves them together at the convergence point instead of patching each symptom separately. Keep genuine single-site defects standalone; omit this table if no actionable findings survived.}
+
+| ID | Level | Severity | Root Cause | Symptoms Covered | Convergence Fix Point |
+|----|-------|----------|------------|------------------|-----------------------|
+| RC-1 | L{1-4} | `{blocker\|critical\|warning}` | {underlying defect across dimensions/repos} | {`[D10-001] file:line`; `[D4-007] file:line`} | {single spec/boundary/module where fixing resolves all listed symptoms} |
+
 ## Consistency
 
-{For each finding from D1–D10 with severity critical or warning, emit one issue entry:}
+{For each finding from D1–D11 with severity critical or warning, emit one issue entry:}
 
 - severity: <blocker | critical | warning>
   file: {target file path — the file that needs to be fixed}
@@ -595,7 +603,7 @@ Use the `# Project Review:` header with a dynamic scope description (derived fro
 | any | info | _(skip)_ | info-level findings are not actionable bugs |
 
 **Rules:**
-- Group issues by file for efficient batch fixing
+- First cluster related cross-dimension / cross-file findings into `## Root Cause Analysis` (`RC-1`, `RC-2`, ...), then group the individual issue entries under `## Consistency` by root-cause group (and file within each group) so `/code-forge:fix --review` executes one integrated fix per root cause rather than fragmented per-symptom patches
 - The `file` field MUST point to the **implementation or doc file that needs changing**. For D10 cross-repo findings where spec is silent, the `file` is the implementation file of the **outlier repo** (the one that diverges from the majority or from the most-reference repo `apcore-python`). For spec-authoritative D10 findings, every non-matching repo emits its own issue entry (one per repo).
 - The `suggestion` field MUST be concrete — e.g., "Add `if not RE_ID.match(id): raise InvalidIdError(code=INVALID_ID)` at line {L}, before the existing `self._index[id] = module` assignment" rather than "fix validation".
 - For D10 intent divergences, include the correct contract row from `spec_contracts` (or from the non-outlier repo, if spec silent) directly in the suggestion.
@@ -688,6 +696,7 @@ Unfixed (manual action needed):
   [D1-001] API surface gap — use /apcore-skills:sync --skip-docs --fix
   [D4-xxx] Doc inconsistency — use /apcore-skills:sync (without --skip-docs) for the doc pass
   [D6-002] Dependency version — manually update {package}
+  {DEFERRED_MANUAL items returned by per-repo fix sub-agents, e.g., missing behavioral modules or non-trivial stubs deferred to /code-forge:plan or /code-forge:fix}
 
 Review changes:
   cd {repo-1} && git diff

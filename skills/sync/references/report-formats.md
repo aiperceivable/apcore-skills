@@ -333,6 +333,14 @@ from Step 1 (repo name, scope group, or `all`).
 ```markdown
 # Project Review: {scope_description}
 
+## Root Cause Analysis
+
+{Cluster surviving blocker/critical/warning findings across Phase A and Phase B by shared underlying root cause (evidence-first only — never invent findings or alter Step 9.0 counts). When one underlying divergence (e.g., a spec change or missing API method) echoes across Phase A (A-/A-C-/A-D-) and Phase B (README/examples/tests), group them into one `RC-{n}` entry so `/code-forge:fix --review` fixes the root cause once at the convergence point instead of patching each echo separately. Keep genuine single-site defects standalone; omit this table if no actionable findings survived.}
+
+| ID | Level | Severity | Root Cause | Symptoms Covered | Convergence Fix Point |
+|----|-------|----------|------------|------------------|-----------------------|
+| RC-1 | L{1-4} | `{blocker\|critical\|warning}` | {underlying divergence across Phase A / Phase B} | {`[A-001] file:line`; `[B-002] file:line`} | {single spec/module/boundary where fixing resolves all listed symptoms} |
+
 ## Consistency
 
 {For each finding from Phase A and Phase B with severity critical or warning, emit one issue entry:}
@@ -383,10 +391,10 @@ the full picture:
 
 ### Rules
 
-- Group issues by file for efficient batch fixing
+- First cluster related cross-phase / cross-file findings into `## Root Cause Analysis` (`RC-1`, `RC-2`, ...), then group the individual issue entries under `## Consistency` by root-cause group (and file within each group) so `/code-forge:fix --review` executes one integrated fix per root cause rather than fragmented per-symptom patches
 - The `file` field MUST point to the **implementation or doc file that needs changing** (not the spec file)
 - The `suggestion` field MUST be concrete enough for code-forge:fix to act on directly (e.g., "Rename `findModule` to `getModule` to match spec" rather than "fix naming")
-- For missing API stubs, include the expected signature from the spec in the `suggestion`
+- For missing API symbols, include the expected signature from the spec in the `suggestion`
 - For doc mismatches, include the correct value from `verified_api` in the `suggestion`
 
 ### Example output

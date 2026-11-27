@@ -14,6 +14,11 @@ Phase A findings to fix:
 Phase B findings to fix:
 {readme, api-ref, examples issues from Phase B}
 
+Fix principles — **Mini · Short · Integrated**:
+- **Mini:** Touch only the smallest set of files and lines needed to fix the root cause; no unrelated refactors or scope creep.
+- **Short:** Keep code and docs concise; never inject hollow `TODO` production stubs (`stub_noop` / unimplemented shells) that pollute the public API and immediately trigger `audit` D9 bloat findings.
+- **Integrated:** Group related Phase A + Phase B findings that share one root cause (e.g., a renamed symbol across source, exports, README, examples, and tests) and fix them coherently in one integrated pass using idiomatic target-language constructs.
+
 Fix rules (apply in order):
 
 PHASE A FIXES (code):
@@ -23,29 +28,25 @@ PHASE A FIXES (code):
    - Update the export in the crate/package root — `__init__.py` (Python), `index.ts` (TypeScript), `lib.rs` (Rust, including any `pub use` alias that renames the symbol)
    - Update any internal references within the same repo
 
-2. MISSING API STUBS — For each missing symbol:
-   - Generate a stub implementation in {language} with TODO markers
-   - Match the signature from the spec (canonical form)
-   - Add the export to the main module file
-   - Create a corresponding test stub in tests/
+2. MISSING API SYMBOLS — **Do NOT emit hollow `TODO` production stubs:**
+   - If the missing symbol is a small, mechanical, fully derivable surface (e.g., missing re-export of an already-implemented symbol, or a trivial idiomatic alias/forwarding method with unambiguous spec semantics), implement it cleanly and concisely with a real passing test.
+   - If it requires non-trivial behavioral logic, do **NOT** create an unimplemented `TODO` stub — add it to `MANUAL_REVIEW_ITEMS` with the exact spec signature, `## Contract:` reference, and target file so it can be implemented properly via `/code-forge:plan` or `/code-forge:fix --review`.
 
 3. MISSING TRAIT/INTERFACE SATISFACTION — For each missing contract:
    - Look up the language's idiomatic mechanism in Step 4.2 item 4 equivalence table
      (e.g., `Display` → Python `__str__`, TS `toString()`, Go `String() string`, Rust `impl Display`, Java `toString()`)
-   - Generate a stub implementation with a TODO marker explaining the contract
-   - For Rust derive-eligible contracts (`Clone`, `Debug`, `PartialEq`, `Hash`, `Default`, `Serialize`), prefer adding the appropriate `#[derive(...)]` attribute
-   - Add a corresponding test asserting the contract is satisfied (e.g., `str(obj)` returns non-empty)
+   - For Rust derive-eligible contracts (`Clone`, `Debug`, `PartialEq`, `Hash`, `Default`, `Serialize`) or straightforward formatting/equality methods whose semantics are fully determined by the struct/class fields, implement cleanly and add a real passing test.
+   - If the trait/interface semantics are non-trivial or ambiguous, add to `MANUAL_REVIEW_ITEMS` instead of generating an empty `TODO` stub.
 
 4. MISSING CONSTRUCTOR VARIANT — For each spec-declared constructor missing from the implementation:
-   - Generate a stub matching the spec signature, using the language's idiomatic factory mechanism
-     (Python `@classmethod`, TS `static`, Go `NewX*` function in same package, Rust `impl Self { fn with_… }`, Java `static` factory or overloaded constructor)
-   - Add to the main export and create a test stub
+   - If it cleanly delegates to an existing constructor/builder with clear defaults (Python `@classmethod`, TS `static`, Go `NewX*`, Rust `impl Self { fn with_… }`, Java `static` factory), implement it directly, export it, and add a real passing test.
+   - If it requires new parsing/IO/validation behavior not yet present, add to `MANUAL_REVIEW_ITEMS` with the spec signature instead of generating a hollow `TODO` stub.
 
 5. MISSING CHECKPOINT INSTRUMENTATION — For each method whose implementation has no checkpoint markers but spec declares an `## Algorithm` section:
    - For each spec-declared checkpoint, insert a logger/tracer call at the textually appropriate position in the method body, using the language-specific marker form from Step 4A's table
      (Python `logger.debug("checkpoint:NAME")`, TS `logger.debug("checkpoint:NAME")`, Go `slog.Debug("checkpoint:NAME")`, Rust `tracing::debug!("checkpoint:NAME")`, Java `logger.debug("checkpoint:NAME")`)
    - Position is BEST-EFFORT — insert the marker just before the line that performs the named work, when identifiable
-   - If position cannot be inferred from existing code, group all markers at the top of the method body in spec order, with a TODO comment
+   - If position cannot be inferred from existing code, add to `MANUAL_REVIEW_ITEMS` instead of dumping unplaced `TODO` markers at the top of the method
 
 6. CHECKPOINT REORDERING — **MANUAL REVIEW ONLY, do NOT auto-fix.**
    - If implementation order differs from spec order, the algorithm semantics may differ deliberately. Reordering checkpoints could introduce a bug.
@@ -56,10 +57,10 @@ PHASE A FIXES (code):
    - If any test fails due to a fix: revert ONLY that specific fix and note it
 
 PHASE B FIXES (docs, examples, tests):
-8. README FIXES — Add missing sections, update API names to match verified API, update version references
+8. README FIXES — Add missing sections, update API names to match verified API, update version references, and keep quick-start examples copy-pasteable and clear for first-time developers (no assumed internal architecture knowledge)
 9. API REFERENCE FIXES — Update symbol names, param names, import paths in all markdown files
-10. EXAMPLE FIXES — Update API usage and dependency versions in example code. For missing example scenarios identified in cross-repo comparison: generate stub example files with TODO markers showing expected scenario.
-11. TEST FIXES — Update API usage in tests to match verified API (renamed methods, updated params). For missing test scenarios identified in cross-repo comparison: generate test stub files with TODO markers showing expected test cases and the reference implementation's test for guidance.
+10. EXAMPLE FIXES — Update API usage and dependency versions in example code. For missing example scenarios identified in cross-repo comparison: if the verified API already supports the scenario, write a minimal working runnable example; otherwise add to `MANUAL_REVIEW_ITEMS` instead of creating a broken `TODO` stub file.
+11. TEST FIXES — Update API usage in tests to match verified API (renamed methods, updated params). For missing test scenarios identified in cross-repo comparison: if the verified API already supports the scenario, write a real passing test matching the reference scenario; otherwise add to `MANUAL_REVIEW_ITEMS` instead of adding skipped/empty `TODO` test stubs.
 12. CONTRADICTION FIXES — Resolve contradictions by aligning all docs to verified API
 13. BEHAVIORAL DIVERGENCE — **MANUAL REVIEW ONLY, do NOT auto-fix.**
     - Add tester divergence findings to MANUAL_REVIEW_ITEMS with the failing input/output diff. Behavioral fixes require understanding spec intent, not pattern matching.
@@ -81,13 +82,13 @@ Error handling: If test runner is not available, skip verification and note it.
 
 Return:
 REPO: {repo-name}
-PHASE_A_FIXES: {count} (naming: {n}, stubs: {n}, traits: {n}, constructors: {n}, checkpoints: {n})
+PHASE_A_FIXES: {count} (naming: {n}, symbols: {n}, traits: {n}, constructors: {n}, checkpoints: {n})
 PHASE_B_FIXES: {count} (readme: {n}, api-refs: {n}, examples: {n}, tests: {n}, contradictions: {n})
 DEEP_CHAIN_DEFERRED: {count} — all A-D-* findings are manual-review-only, reported in MANUAL_REVIEW_ITEMS
 TEST_RESULT: {pass|fail|skipped}
 TEST_COUNTS: {passed}/{total}
 REVERTED_FIXES: {list or "none"}
-MANUAL_REVIEW_ITEMS: {list — checkpoint reorderings, behavioral divergences, ambiguous trait stubs, deep-chain findings with evidence and recommendation}
+MANUAL_REVIEW_ITEMS: {list — non-trivial missing APIs/traits/constructors/scenarios, checkpoint reorderings, behavioral divergences, deep-chain findings with evidence and recommendation}
 FILES_MODIFIED: {list}
 
 ---
@@ -103,6 +104,10 @@ Apply documentation consistency fixes for {doc_repo_path}.
 Phase B findings to fix:
 {spec chain contradictions, completeness gaps, cross-ref issues from Phase B}
 
+Fix principles — **Mini · Short · Integrated**:
+- **Mini & Short:** Make surgical in-place edits at the authoritative section — never append trailing update notes, duplicate definitions, or speculative filler.
+- **Integrated & Developer-Friendly:** Resolve all cross-document references for a changed symbol together, and keep user-facing code examples self-contained and copy-pasteable for a first-time developer.
+
 Fix rules:
 
 1. SPEC CHAIN CONTRADICTIONS — For each contradiction between documents:
@@ -113,8 +118,8 @@ Fix rules:
    - If the contradiction is between documents at the same level: flag for manual review, do NOT auto-fix
 
 2. COMPLETENESS GAPS — For features mentioned in PRD/SRS but missing feature specs:
-   - Do NOT generate feature specs automatically (too complex for auto-fix)
-   - Add a TODO note in the appropriate location
+   - Do NOT generate feature specs automatically (too complex for auto-fix) and do NOT inject `TODO` placeholders into formal spec files (violates strict doc verification)
+   - Report each gap in `MANUAL_REVIEW_ITEMS` recommending `/spec-forge:tech-design` or `/spec-forge:srs`
 
 3. CROSS-REFERENCE FIXES — Fix broken internal references:
    - Update section references to point to correct locations
